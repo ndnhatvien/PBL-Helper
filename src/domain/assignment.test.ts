@@ -59,4 +59,14 @@ describe("phân công giảng viên chấm", () => {
     expect(result.assignments["g1"]).toBe("gv3");
     expect(result.assignments["g2"]).not.toBe("gv3");
   });
+
+  it("không tự ý phân công nếu tất cả giảng viên hiện có đều là GVHD của nhóm", () => {
+    // Nhóm g1 có 2 GVHD đồng hướng dẫn là gv1 và gv2. Trong đợt chỉ có gv1 và gv2.
+    const testGroups: AssignmentGroupInput[] = [
+      { id: "g1", groupCode: "PBL01", studentCount: 3, excludedLecturerIds: ["gv1", "gv2"] },
+    ];
+    const result = suggestAssignment(testGroups, ["gv1", "gv2"], "students");
+    expect(result.assignments["g1"]).toBeUndefined();
+    expect(result.unassignedGroupIds).toContain("g1");
+  });
 });

@@ -14,6 +14,7 @@ export interface AssignmentResult {
     groupCount: number;
     studentCount: number;
   }>;
+  unassignedGroupIds: string[];
 }
 
 /**
@@ -33,7 +34,11 @@ export function suggestAssignment(
   mode: BalanceMode = "students",
 ): AssignmentResult {
   if (lecturerIds.length === 0) {
-    return { assignments: {}, workload: [] };
+    return {
+      assignments: {},
+      workload: [],
+      unassignedGroupIds: groups.map((g) => g.id),
+    };
   }
 
   const workload = lecturerIds.map((lecturerId) => ({
@@ -49,15 +54,19 @@ export function suggestAssignment(
   });
 
   const assignments: Record<string, string> = {};
+  const unassignedGroupIds: string[] = [];
 
   for (const group of sortedGroups) {
     const excluded = new Set(group.excludedLecturerIds ?? []);
     const eligible = workload.filter((w) => !excluded.has(w.lecturerId));
-    // Nếu tất cả giảng viên đều là GVHD của nhóm, fallback sang danh sách đầy đủ
-    const candidates = eligible.length > 0 ? eligible : workload;
 
-    let chosen = candidates[0];
-    for (const candidate of candidates) {
+    if (eligible.length === 0) {
+      unassignedGroupIds.push(group.id);
+      continue;
+    }
+
+    let chosen = eligible[0];
+    for (const candidate of eligible) {
       const primary =
         mode === "students"
           ? candidate.studentCount - chosen.studentCount
@@ -80,5 +89,5 @@ export function suggestAssignment(
     }
   }
 
-  return { assignments, workload };
+  return { assignments, workload, unassignedGroupIds };
 }

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { ExamBatch, GroupView } from "../types";
 import type { AppData } from "../store/store";
 import type { BatchContext } from "../domain/selectors";
-import { getAvailableStudents, getGroupViews } from "../domain/selectors";
+import { filterBatchContext, getAvailableStudents, getGroupViews } from "../domain/selectors";
 import type { BalanceMode } from "../domain/assignment";
 import { suggestAssignment } from "../domain/assignment";
 import { getGroupAdvisorIds } from "../domain/advisor";
@@ -94,6 +94,22 @@ export function GroupsPage({
     [activeLecturers, groupViews],
   );
 
+  const hasNoEligibleGrader = useMemo(() => {
+    if (groupViews.length === 0 || activeLecturers.length === 0) return false;
+    return groupViews.every((view) => {
+      const advIds = new Set(
+        getGroupAdvisorIds(
+          view.group,
+          context.members,
+          context.students,
+          context.lecturers,
+          data.sourceWorkbooks,
+        ),
+      );
+      return activeLecturers.every((l) => advIds.has(l.id));
+    });
+  }, [groupViews, activeLecturers, context, data.sourceWorkbooks]);
+
   if (!batch) {
     return (
       <div className="page">
@@ -143,38 +159,93 @@ export function GroupsPage({
   }
 
   function handleSuggest() {
-    if (groupViews.length === 0) {
-      onNotice("danger", "Chưa có nhóm PBL để phân công.");
-      return;
+    let currentData = data;
+    let currentGroupViews = groupViews;
+    let createdCount = 0;
+
+    // 1. Nếu chưa có nhóm PBL nào:
+    if (currentGroupViews.length === 0) {
+      if (availableWithGroup.length > 0 && batch) {
+        // Tự động tạo nhóm từ mã nhóm nguồn Excel trước
+        const autoRes = autoCreateGroupsFromSource(currentData, batch.id);
+        if (autoRes.error) {
+          onNotice("danger", autoRes.error);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          return;
+        }
+        currentData = autoRes.data;
+        setData(currentData);
+        const newContext = filterBatchContext(currentData, batch.id);
+        currentGroupViews = getGroupViews(newContext);
+        createdCount = currentGroupViews.length;
+      } else {
+        onNotice(
+          "danger",
+          "Chưa có nhóm PBL nào trong đợt để phân công. Hãy tạo nhóm ở phần bên dưới trước.",
+        );
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
     }
+
     if (activeLecturers.length === 0) {
       onNotice(
         "danger",
-        "Chưa có giảng viên đang hoạt động. Hãy thêm giảng viên trước.",
+        "Chưa có giảng viên đang hoạt động trong đợt. Hãy thêm giảng viên ở bảng 'Giảng viên của đợt' phía trên.",
       );
+      window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
+
+    // 2. Chạy thuật toán gợi ý phân công:
+    const activeIds = activeLecturers.map((lecturer) => lecturer.id);
     const result = suggestAssignment(
-      groupViews.map((view) => ({
+      currentGroupViews.map((view) => ({
         id: view.group.id,
         groupCode: view.group.groupCode,
         studentCount: view.studentCount,
         excludedLecturerIds: getGroupAdvisorIds(
           view.group,
-          context.members,
-          context.students,
-          context.lecturers,
-          data.sourceWorkbooks,
+          currentData.members,
+          currentData.students,
+          currentData.lecturers,
+          currentData.sourceWorkbooks,
         ),
       })),
-      activeLecturers.map((lecturer) => lecturer.id),
+      activeIds,
       mode,
     );
-    setData(applyAssignments(data, result.assignments));
-    onNotice(
-      "success",
-      `Đã gợi ý phân công theo ${mode === "students" ? "số sinh viên" : "số nhóm"} (đã loại trừ toàn bộ GVHD của từng nhóm). Bạn có thể điều chỉnh thủ công từng nhóm bên dưới.`,
-    );
+
+    const assignedCount = Object.keys(result.assignments).length;
+    const unassignedCount = result.unassignedGroupIds?.length ?? 0;
+
+    if (assignedCount === 0 && unassignedCount > 0) {
+      onNotice(
+        "danger",
+        `Không thể phân công: Toàn bộ ${activeLecturers.length} giảng viên hiện có đều là GVHD của các nhóm (quy chế cấm GVHD tự chấm sinh viên mình hướng dẫn). Hãy thêm ít nhất 1 giảng viên chấm độc lập ở bảng 'Giảng viên của đợt' phía trên để phân công chéo.`,
+      );
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      if (currentData !== data) {
+        setData(currentData);
+      }
+      return;
+    }
+
+    const nextData = applyAssignments(currentData, result.assignments);
+    setData(nextData);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+
+    if (unassignedCount > 0) {
+      onNotice(
+        "warning",
+        `${createdCount > 0 ? `Đã tạo ${createdCount} nhóm từ file nguồn. ` : ""}Đã phân công ${assignedCount} nhóm. Còn ${unassignedCount} nhóm chưa thể phân công vì thiếu giảng viên chấm độc lập (các giảng viên còn lại đều là GVHD của nhóm đó). Hãy thêm giảng viên chấm vào đợt.`,
+      );
+    } else {
+      onNotice(
+        "success",
+        `${createdCount > 0 ? `Đã tự động tạo ${createdCount} nhóm từ file nguồn và ` : ""}Đã gợi ý phân công thành công ${assignedCount} nhóm theo ${mode === "students" ? "số sinh viên" : "số nhóm"} (tuyệt đối không phân công GVHD tự chấm).`,
+      );
+    }
   }
 
   return (
@@ -218,6 +289,39 @@ export function GroupsPage({
             {groupViews.length} nhóm · {activeLecturers.length} GV hoạt động
           </Badge>
         </div>
+
+        {hasNoEligibleGrader ? (
+          <div
+            style={{
+              background: "var(--red-soft)",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              marginBottom: "16px",
+              border: "1px solid rgba(180, 35, 24, 0.2)",
+              fontSize: "0.88rem",
+              color: "var(--red)",
+            }}
+          >
+            ⛔ <strong>Thiếu giảng viên chấm độc lập:</strong> Toàn bộ {activeLecturers.length} giảng viên hiện có đều là GVHD của các nhóm trong đợt (quy chế cấm GVHD tự chấm sinh viên mình hướng dẫn). Vui lòng thêm ít nhất 1 giảng viên chấm độc lập ở bảng <em>Giảng viên của đợt</em> phía trên để hệ thống có thể phân công chấm.
+          </div>
+        ) : groupViews.length === 0 ? (
+          <div
+            style={{
+              background: "var(--amber-soft)",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              marginBottom: "16px",
+              border: "1px solid rgba(180, 83, 9, 0.2)",
+              fontSize: "0.88rem",
+              color: "var(--amber)",
+            }}
+          >
+            💡 <strong>Chưa có nhóm PBL nào:</strong>{" "}
+            {availableWithGroup.length > 0
+              ? `Phát hiện ${availableWithGroup.length} sinh viên đã có mã nhóm từ file Excel. Bấm nút "⚡ Gợi ý phân công tự động" bên dưới sẽ tự động gom nhóm từ file nguồn và phân công chấm ngay.`
+              : "Hãy tạo nhóm ở phần bên dưới trước khi phân công giảng viên chấm."}
+          </div>
+        ) : null}
 
         <div className="radio-row">
           <label className="checkbox-line">
