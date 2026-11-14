@@ -69,4 +69,93 @@ describe("phân công giảng viên chấm", () => {
     expect(result.assignments["g1"]).toBeUndefined();
     expect(result.unassignedGroupIds).toContain("g1");
   });
+
+  it("cân bằng theo số nhóm và gom cụm theo bảng điểm (không phân tán qua nhiều bảng điểm)", () => {
+    // 3 bảng điểm (wb1: 6 nhóm, wb2: 6 nhóm, wb3: 6 nhóm) = 18 nhóm
+    // 3 giảng viên gv1, gv2, gv3. Chế độ cân bằng "groups".
+    // Mỗi GV sẽ nhận đúng 6 nhóm và mỗi GV chỉ nhận nhóm từ 1 bảng điểm duy nhất!
+    const multiWbGroups: AssignmentGroupInput[] = [];
+    for (let i = 1; i <= 6; i += 1) {
+      multiWbGroups.push({ id: `wb1_g${i}`, groupCode: `WB1-N${i}`, studentCount: 3, sourceWorkbookId: "wb1" });
+      multiWbGroups.push({ id: `wb2_g${i}`, groupCode: `WB2-N${i}`, studentCount: 3, sourceWorkbookId: "wb2" });
+      multiWbGroups.push({ id: `wb3_g${i}`, groupCode: `WB3-N${i}`, studentCount: 3, sourceWorkbookId: "wb3" });
+    }
+
+    const result = suggestAssignment(multiWbGroups, ["gv1", "gv2", "gv3"], "groups");
+
+    // 1. Cân bằng số nhóm hoàn hảo: mỗi GV nhận đúng 6 nhóm
+    for (const item of result.workload) {
+      expect(item.groupCount).toBe(6);
+      // 2. Mỗi GV chỉ chấm đúng 1 bảng điểm duy nhất (tối ưu hóa gom cụm)
+      expect(item.workbookIds?.length).toBe(1);
+    }
+  });
+
+  it("ưu tiên gom cụm theo bảng điểm ngay cả khi có loại trừ GVHD", () => {
+    // wb1 (6 nhóm) do gv1 hướng dẫn -> gv1 bị loại trừ
+    // wb2 (6 nhóm) do gv2 hướng dẫn -> gv2 bị loại trừ
+    // 2 GV chấm: gv1 và gv2.
+    // Kết quả chuẩn: gv1 chấm toàn bộ 6 nhóm wb2, gv2 chấm toàn bộ 6 nhóm wb1!
+    const testGroups: AssignmentGroupInput[] = [];
+    for (let i = 1; i <= 6; i += 1) {
+      testGroups.push({
+        id: `wb1_g${i}`,
+        groupCode: `WB1-N${i}`,
+        studentCount: 3,
+        sourceWorkbookId: "wb1",
+        excludedLecturerIds: ["gv1"],
+      });
+      testGroups.push({
+        id: `wb2_g${i}`,
+        groupCode: `WB2-N${i}`,
+        studentCount: 3,
+        sourceWorkbookId: "wb2",
+        excludedLecturerIds: ["gv2"],
+      });
+    }
+
+    const result = suggestAssignment(testGroups, ["gv1", "gv2"], "groups");
+
+    expect(result.unassignedGroupIds).toHaveLength(0);
+    // gv1 chấm đúng 6 nhóm wb2 (không chấm wb1)
+    const gv1Groups = Object.entries(result.assignments).filter(([, lId]) => lId === "gv1").map(([gId]) => gId);
+    expect(gv1Groups).toHaveLength(6);
+    expect(gv1Groups.every((id) => id.startsWith("wb2_"))).toBe(true);
+
+    // gv2 chấm đúng 6 nhóm wb1 (không chấm wb2)
+    const gv2Groups = Object.entries(result.assignments).filter(([, lId]) => lId === "gv2").map(([gId]) => gId);
+    expect(gv2Groups).toHaveLength(6);
+    expect(gv2Groups.every((id) => id.startsWith("wb1_"))).toBe(true);
+  });
+
+  it("phân công cân bằng chặt chẽ khi có nhiều bảng điểm kích thước khác nhau", () => {
+    // 4 bảng điểm kích thước khác nhau:
+    // wb1: 10 nhóm, wb2: 8 nhóm, wb3: 7 nhóm, wb4: 5 nhóm -> Tổng = 30 nhóm
+    // 5 GV: gv1..gv5 -> Target mỗi GV đúng 6 nhóm (chênh lệch max - min = 0)
+    const testGroups: AssignmentGroupInput[] = [];
+    const sizes = { wb1: 10, wb2: 8, wb3: 7, wb4: 5 };
+    for (const [wbId, count] of Object.entries(sizes)) {
+      for (let i = 1; i <= count; i += 1) {
+        testGroups.push({
+          id: `${wbId}_g${i}`,
+          groupCode: `${wbId}-N${i}`,
+          studentCount: 3,
+          sourceWorkbookId: wbId,
+        });
+      }
+    }
+
+    const result = suggestAssignment(testGroups, ["gv1", "gv2", "gv3", "gv4", "gv5"], "groups");
+
+    expect(result.unassignedGroupIds).toHaveLength(0);
+    const counts = result.workload.map((w) => w.groupCount);
+    // Cực kỳ cân bằng: mỗi GV đúng 6 nhóm
+    expect(Math.max(...counts)).toBe(6);
+    expect(Math.min(...counts)).toBe(6);
+
+    // Không GV nào phải chấm quá 2 bảng điểm (giảm phân tán tối đa)
+    for (const w of result.workload) {
+      expect(w.workbookIds?.length).toBeLessThanOrEqual(2);
+    }
+  });
 });

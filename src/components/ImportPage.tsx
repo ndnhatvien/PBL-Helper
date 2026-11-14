@@ -80,6 +80,73 @@ export function ImportPage({
     [pending, existingStudents],
   );
 
+  const pendingTotalStudents = useMemo(
+    () => pending.reduce((sum, p) => sum + p.rows.length, 0),
+    [pending],
+  );
+  const pendingTotalGroups = useMemo(
+    () =>
+      pending.reduce(
+        (sum, p) => sum + (p.validation?.groupInspection.groupCount ?? 0),
+        0,
+      ),
+    [pending],
+  );
+  const pendingMissingGroups = useMemo(
+    () =>
+      pending.reduce(
+        (sum, p) => sum + (p.validation?.groupInspection.missingGroupCount ?? 0),
+        0,
+      ),
+    [pending],
+  );
+
+  const batchStudents = useMemo(
+    () => data.students.filter((s) => s.batchId === batch?.id),
+    [data.students, batch?.id],
+  );
+
+  const importedGroupsSummary = useMemo(() => {
+    let totalGroups = 0;
+    const countByWorkbook = new Map<
+      string,
+      { groupCount: number; missingCount: number }
+    >();
+
+    for (const wb of sourceWorkbooks) {
+      const wbStudents = batchStudents.filter(
+        (s) => s.sourceWorkbookId === wb.id,
+      );
+      const codes = new Set(
+        wbStudents
+          .map((s) => s.groupCodeFromSource?.trim())
+          .filter(Boolean),
+      );
+      const missingCount = wbStudents.filter(
+        (s) => !s.groupCodeFromSource || s.groupCodeFromSource.trim() === "",
+      ).length;
+      countByWorkbook.set(wb.id, { groupCount: codes.size, missingCount });
+      totalGroups += codes.size;
+    }
+
+    return { totalGroups, countByWorkbook };
+  }, [sourceWorkbooks, batchStudents]);
+
+  const totalAdvisorsCount = useMemo(() => {
+    const names = new Set<string>();
+    for (const wb of sourceWorkbooks) {
+      const list = wb.metaLecturerNames?.length
+        ? wb.metaLecturerNames
+        : wb.metaLecturerName
+          ? splitLecturerNames(wb.metaLecturerName)
+          : [];
+      for (const n of list) {
+        if (n.trim()) names.add(n.trim().toLowerCase());
+      }
+    }
+    return names.size;
+  }, [sourceWorkbooks]);
+
   const hasBlockingErrors = useMemo(
     () =>
       pending.some(
@@ -367,6 +434,37 @@ export function ImportPage({
             </Notice>
           ) : null}
 
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "12px",
+              marginBottom: "16px",
+              padding: "12px 16px",
+              background: "var(--surface-sunken)",
+              borderRadius: "8px",
+              border: "1px solid var(--border-soft)",
+            }}
+          >
+            <div>
+              <span className="muted" style={{ fontSize: "0.85rem", display: "block" }}>Tổng số file chờ nạp</span>
+              <strong style={{ fontSize: "1.2rem" }}>{pending.length} file</strong>
+            </div>
+            <div>
+              <span className="muted" style={{ fontSize: "0.85rem", display: "block" }}>Tổng sinh viên đọc được</span>
+              <strong style={{ fontSize: "1.2rem" }}>{pendingTotalStudents} sinh viên</strong>
+            </div>
+            <div>
+              <span className="muted" style={{ fontSize: "0.85rem", display: "block" }}>Tổng số nhóm dự kiến</span>
+              <strong style={{ fontSize: "1.2rem", color: "var(--teal)" }}>{pendingTotalGroups} nhóm</strong>
+              {pendingMissingGroups > 0 ? (
+                <small style={{ display: "block", color: "var(--danger)" }}>
+                  {pendingMissingGroups} SV thiếu nhóm
+                </small>
+              ) : null}
+            </div>
+          </div>
+
           <div className="pending-list">
             {pending.map((workbook) => (
               <PendingWorkbookCard
@@ -407,86 +505,155 @@ export function ImportPage({
       ) : null}
 
       <section className="panel">
-        <h2>File nguồn đã nhập</h2>
+        <div className="panel-header">
+          <div>
+            <h2>File nguồn đã nhập</h2>
+            <p className="muted">
+              Danh sách các bảng điểm / lớp học phần đã lưu chính thức vào đợt thi.
+            </p>
+          </div>
+          {sourceWorkbooks.length > 0 ? (
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <Badge tone="info">{sourceWorkbooks.length} bảng điểm</Badge>
+              <Badge tone="purple">{batchStudents.length} sinh viên</Badge>
+              <Badge tone="success">{importedGroupsSummary.totalGroups} nhóm sinh viên</Badge>
+            </div>
+          ) : null}
+        </div>
+
         {sourceWorkbooks.length === 0 ? (
           <EmptyState title="Chưa nhập file nào" />
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>File</th>
-                  <th>Mẫu / Học phần</th>
-                  <th>Giảng viên hướng dẫn (GVHD)</th>
-                  <th>Sheet</th>
-                  <th>Sinh viên</th>
-                  <th>Header</th>
-                  <th>Nhập lúc</th>
-                  <th>Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sourceWorkbooks.map((workbook) => (
-                  <tr key={workbook.id}>
-                    <td>
-                      <strong>{workbook.fileName}</strong>
-                    </td>
-                    <td>
-                      {workbook.sourceTemplate === "dsts" ? (
-                        <Badge tone="purple">DSTS</Badge>
-                      ) : workbook.sourceTemplate === "bang_diem" ? (
-                        <Badge tone="info">Bảng điểm</Badge>
-                      ) : (
-                        <Badge tone="neutral">Tùy chỉnh</Badge>
-                      )}{" "}
-                      <small className="muted">{workbook.metaCourseCode || ""}</small>
-                    </td>
-                    <td>
-                      <div>
-                        <strong>{workbook.metaLecturerName || "—"}</strong>
-                        {workbook.metaLecturerNames && workbook.metaLecturerNames.length > 1 ? (
-                          <small style={{ display: "block", color: "var(--teal)" }}>
-                            (Đồng hướng dẫn: {workbook.metaLecturerNames.join(" & ")})
-                          </small>
-                        ) : null}
-                      </div>
-                    </td>
-                    <td>{workbook.sheetName}</td>
-                    <td>
-                      {
-                        data.students.filter(
-                          (student) => student.sourceWorkbookId === workbook.id,
-                        ).length
-                      }
-                    </td>
-                    <td>Dòng {workbook.headerRow + 1}</td>
-                    <td>{new Date(workbook.importedAt).toLocaleString("vi-VN")}</td>
-                    <td>
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        <button
-                          type="button"
-                          className="button small secondary"
-                          title="Sửa GVHD của file nếu nhập sai hoặc thiếu GVHD đồng hướng dẫn"
-                          onClick={() => startEditWorkbook(workbook)}
-                        >
-                          ✏️ Sửa GVHD
-                        </button>
-                        <button
-                          type="button"
-                          className="button small ghost"
-                          style={{ color: "var(--red)" }}
-                          title="Xóa file này khỏi đợt"
-                          onClick={() => handleDeleteWorkbook(workbook)}
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: "12px",
+                marginBottom: "16px",
+                padding: "12px 16px",
+                background: "var(--surface-sunken)",
+                borderRadius: "8px",
+                border: "1px solid var(--border-soft)",
+              }}
+            >
+              <div>
+                <span className="muted" style={{ fontSize: "0.85rem", display: "block" }}>Bảng điểm đã nạp</span>
+                <strong style={{ fontSize: "1.2rem" }}>{sourceWorkbooks.length} bảng điểm</strong>
+              </div>
+              <div>
+                <span className="muted" style={{ fontSize: "0.85rem", display: "block" }}>Tổng sinh viên</span>
+                <strong style={{ fontSize: "1.2rem" }}>{batchStudents.length} sinh viên</strong>
+              </div>
+              <div>
+                <span className="muted" style={{ fontSize: "0.85rem", display: "block" }}>Tổng số nhóm sinh viên</span>
+                <strong style={{ fontSize: "1.2rem", color: "var(--teal)" }}>
+                  {importedGroupsSummary.totalGroups} nhóm
+                </strong>
+                <small style={{ display: "block", color: "var(--muted)" }}>
+                  (tổng hợp riêng từng bảng điểm)
+                </small>
+              </div>
+              <div>
+                <span className="muted" style={{ fontSize: "0.85rem", display: "block" }}>Giảng viên hướng dẫn</span>
+                <strong style={{ fontSize: "1.2rem" }}>{totalAdvisorsCount} giảng viên</strong>
+              </div>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th>Mẫu / Học phần</th>
+                    <th>Giảng viên hướng dẫn (GVHD)</th>
+                    <th>Sheet</th>
+                    <th>Sinh viên</th>
+                    <th>Số nhóm</th>
+                    <th>Header</th>
+                    <th>Nhập lúc</th>
+                    <th>Thao tác</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sourceWorkbooks.map((workbook) => {
+                    const groupStats = importedGroupsSummary.countByWorkbook.get(workbook.id) ?? {
+                      groupCount: 0,
+                      missingCount: 0,
+                    };
+                    return (
+                      <tr key={workbook.id}>
+                        <td>
+                          <strong>{workbook.fileName}</strong>
+                        </td>
+                        <td>
+                          {workbook.sourceTemplate === "dsts" ? (
+                            <Badge tone="purple">DSTS</Badge>
+                          ) : workbook.sourceTemplate === "bang_diem" ? (
+                            <Badge tone="info">Bảng điểm</Badge>
+                          ) : (
+                            <Badge tone="neutral">Tùy chỉnh</Badge>
+                          )}{" "}
+                          <small className="muted">{workbook.metaCourseCode || ""}</small>
+                        </td>
+                        <td>
+                          <div>
+                            <strong>{workbook.metaLecturerName || "—"}</strong>
+                            {workbook.metaLecturerNames && workbook.metaLecturerNames.length > 1 ? (
+                              <small style={{ display: "block", color: "var(--teal)" }}>
+                                (Đồng hướng dẫn: {workbook.metaLecturerNames.join(" & ")})
+                              </small>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td>{workbook.sheetName}</td>
+                        <td>
+                          {
+                            data.students.filter(
+                              (student) => student.sourceWorkbookId === workbook.id,
+                            ).length
+                          } SV
+                        </td>
+                        <td>
+                          <Badge tone={groupStats.groupCount > 0 ? "info" : "warning"}>
+                            {groupStats.groupCount} nhóm
+                          </Badge>
+                          {groupStats.missingCount > 0 ? (
+                            <small style={{ display: "block", color: "var(--danger)" }}>
+                              ({groupStats.missingCount} SV thiếu nhóm)
+                            </small>
+                          ) : null}
+                        </td>
+                        <td>Dòng {workbook.headerRow + 1}</td>
+                        <td>{new Date(workbook.importedAt).toLocaleString("vi-VN")}</td>
+                        <td>
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            <button
+                              type="button"
+                              className="button small secondary"
+                              title="Sửa GVHD của file nếu nhập sai hoặc thiếu GVHD đồng hướng dẫn"
+                              onClick={() => startEditWorkbook(workbook)}
+                            >
+                              ✏️ Sửa GVHD
+                            </button>
+                            <button
+                              type="button"
+                              className="button small ghost"
+                              style={{ color: "var(--red)" }}
+                              title="Xóa file này khỏi đợt"
+                              onClick={() => handleDeleteWorkbook(workbook)}
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 

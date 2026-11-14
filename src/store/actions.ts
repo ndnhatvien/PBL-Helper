@@ -725,24 +725,81 @@ export function autoCreateGroupsFromSource(
     };
   }
 
-  const grouped = new Map<string, { code: string; students: Student[] }>();
+  const workbookMap = new Map(
+    data.sourceWorkbooks
+      .filter((wb) => wb.batchId === batchId)
+      .map((wb) => [wb.id, wb]),
+  );
+
+  // Kiểm tra mã nhóm nào xuất hiện ở nhiều hơn 1 bảng điểm (bị trùng mã nhóm nguồn giữa các bảng điểm)
+  const workbooksByRawCode = new Map<string, Set<string>>();
+  for (const s of studentsWithGroup) {
+    const raw = s.groupCodeFromSource.trim().toLowerCase();
+    const set = workbooksByRawCode.get(raw) ?? new Set<string>();
+    set.add(s.sourceWorkbookId);
+    workbooksByRawCode.set(raw, set);
+  }
+
+  // Gom theo cặp (sourceWorkbookId, rawGroupCode) để đảm bảo không bị gộp nhóm giữa các bảng điểm khác nhau
+  const grouped = new Map<
+    string,
+    {
+      sourceWorkbookId: string;
+      rawCode: string;
+      finalGroupCode: string;
+      students: Student[];
+    }
+  >();
+
   for (const s of studentsWithGroup) {
     const rawCode = s.groupCodeFromSource.trim();
-    const key = rawCode.toLowerCase();
-    const existing = grouped.get(key);
+    const compoundKey = `${s.sourceWorkbookId}::${rawCode.toLowerCase()}`;
+    const existing = grouped.get(compoundKey);
     if (existing) {
       existing.students.push(s);
     } else {
-      grouped.set(key, { code: rawCode, students: [s] });
+      const wb = workbookMap.get(s.sourceWorkbookId);
+      const isColliding = (workbooksByRawCode.get(rawCode.toLowerCase())?.size ?? 0) > 1;
+
+      let prefix = "";
+      if (isColliding && wb) {
+        prefix = (wb.metaCourseCode?.trim() || wb.fileName.replace(/\.(xlsx|xls)$/i, "").trim());
+      }
+
+      // Chuẩn hóa nhãn nhóm: nếu chỉ là số như "1", "01" thì hiển thị "Nhóm 1", "Nhóm 01" khi có trùng
+      const isPlainNumber = /^\d+$/.test(rawCode);
+      const groupLabel = isPlainNumber && isColliding ? `Nhóm ${rawCode}` : rawCode;
+
+      let finalGroupCode = groupLabel;
+      if (prefix && !rawCode.toLowerCase().includes(prefix.toLowerCase())) {
+        finalGroupCode = `${prefix} - ${groupLabel}`;
+      }
+
+      grouped.set(compoundKey, {
+        sourceWorkbookId: s.sourceWorkbookId,
+        rawCode,
+        finalGroupCode,
+        students: [s],
+      });
     }
   }
 
   let nextData = data;
   let createdCount = 0;
 
-  for (const [, { code, students }] of grouped.entries()) {
+  for (const [, { sourceWorkbookId, rawCode, finalGroupCode, students }] of grouped.entries()) {
+    // Tìm nhóm đã tồn tại trong đợt phù hợp với bảng điểm này
     const existingGroup = nextData.groups.find(
-      (g) => g.batchId === batchId && g.groupCode.toLowerCase() === code.toLowerCase(),
+      (g) =>
+        g.batchId === batchId &&
+        (g.groupCode.toLowerCase() === finalGroupCode.toLowerCase() ||
+          // Hoặc khớp mã nhóm gốc VÀ có thành viên cùng sourceWorkbookId
+          (g.groupCode.toLowerCase() === rawCode.toLowerCase() &&
+            nextData.members.some((m) => {
+              if (m.groupId !== g.id) return false;
+              const stu = nextData.students.find((st) => st.id === m.studentId);
+              return stu?.sourceWorkbookId === sourceWorkbookId;
+            }))),
     );
 
     if (existingGroup) {
@@ -753,56 +810,51 @@ export function autoCreateGroupsFromSource(
         }
       }
     } else {
-      const workbookMap = new Map(
-        nextData.sourceWorkbooks
-          .filter((wb) => wb.batchId === batchId)
-          .map((wb) => [wb.id, wb]),
-      );
+      // Xác định defaultAdvisorId chuẩn theo bảng điểm / sinh viên
+      const wb = workbookMap.get(sourceWorkbookId);
       let defaultAdvisorId: string | null = null;
-      for (const student of students) {
-        if (student.advisorNameFromSource) {
-          const splitNames = splitLecturerNames(student.advisorNameFromSource);
-          for (const sName of splitNames) {
-            const lec = nextData.lecturers.find(
-              (l) =>
-                l.batchId === batchId &&
-                l.displayName.trim().toLowerCase() === sName.trim().toLowerCase(),
-            );
-            if (lec) {
-              defaultAdvisorId = lec.id;
-              break;
-            }
-          }
-          if (defaultAdvisorId) break;
-        }
-
-        const wb = workbookMap.get(student.sourceWorkbookId);
-        const wbNames = (
-          wb?.metaLecturerNames?.length
-            ? wb.metaLecturerNames
-            : wb?.metaLecturerName
-              ? splitLecturerNames(wb.metaLecturerName)
-              : []
-        )
-          .map((n) => n.trim())
-          .filter(Boolean);
-        for (const wbName of wbNames) {
+      if (wb) {
+        const wbAdvisorNames = (wb.metaLecturerNames && wb.metaLecturerNames.length > 0)
+          ? wb.metaLecturerNames
+          : wb.metaLecturerName
+            ? splitLecturerNames(wb.metaLecturerName)
+            : [];
+        for (const wbName of wbAdvisorNames) {
+          const clean = wbName.trim().toLowerCase();
           const lec = nextData.lecturers.find(
-            (l) =>
-              l.batchId === batchId &&
-              l.displayName.trim().toLowerCase() === wbName.trim().toLowerCase(),
+            (l) => l.batchId === batchId && l.displayName.trim().toLowerCase() === clean,
           );
           if (lec) {
             defaultAdvisorId = lec.id;
             break;
           }
         }
-        if (defaultAdvisorId) break;
       }
+
+      if (!defaultAdvisorId) {
+        for (const student of students) {
+          if (student.advisorNameFromSource) {
+            const splitNames = splitLecturerNames(student.advisorNameFromSource);
+            for (const sName of splitNames) {
+              const lec = nextData.lecturers.find(
+                (l) =>
+                  l.batchId === batchId &&
+                  l.displayName.trim().toLowerCase() === sName.trim().toLowerCase(),
+              );
+              if (lec) {
+                defaultAdvisorId = lec.id;
+                break;
+              }
+            }
+            if (defaultAdvisorId) break;
+          }
+        }
+      }
+
       const createResult = createGroup(
         nextData,
         batchId,
-        code,
+        finalGroupCode,
         students.map((s) => s.id),
         defaultAdvisorId,
       );
@@ -839,6 +891,32 @@ export function autoCreateGroupsFromSource(
     createdCount,
     skippedCount,
     message: `Đã tự động tạo/cập nhật ${createdCount} nhóm PBL từ file nguồn cho ${studentsWithGroup.length} sinh viên.${skippedCount > 0 ? ` Còn ${skippedCount} sinh viên chưa có mã nhóm nguồn cần phân nhóm thủ công.` : ""}`,
+  };
+}
+
+export function resetAndRecreateGroupsFromSource(
+  data: AppData,
+  batchId: string,
+): ActionResult & { createdCount: number; message?: string } {
+  const batch = data.batches.find((b) => b.id === batchId);
+  if (!batch) return { data, error: "Không tìm thấy đợt thi.", createdCount: 0 };
+
+  const activeGroupIds = new Set(
+    data.groups.filter((g) => g.batchId === batchId).map((g) => g.id),
+  );
+
+  const cleanData: AppData = {
+    ...data,
+    groups: data.groups.filter((g) => g.batchId !== batchId),
+    members: data.members.filter((m) => !activeGroupIds.has(m.groupId)),
+  };
+
+  const autoResult = autoCreateGroupsFromSource(cleanData, batchId);
+  return {
+    data: autoResult.data,
+    error: autoResult.error,
+    createdCount: autoResult.createdCount,
+    message: `Đã làm mới và tự động tạo lại ${autoResult.createdCount} nhóm sinh viên chuẩn theo từng bảng điểm.`,
   };
 }
 

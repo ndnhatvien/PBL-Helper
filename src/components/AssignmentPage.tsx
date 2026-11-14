@@ -79,6 +79,13 @@ export function AssignmentPage({
         id: view.group.id,
         groupCode: view.group.groupCode,
         studentCount: view.studentCount,
+        sourceWorkbookId:
+          view.members[0]?.student.sourceWorkbookId ||
+          context.students.find((s) =>
+            context.members.some(
+              (m) => m.groupId === view.group.id && m.studentId === s.id,
+            ),
+          )?.sourceWorkbookId,
       })),
       activeLecturers.map((lecturer) => lecturer.id),
       mode,

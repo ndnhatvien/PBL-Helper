@@ -17,6 +17,7 @@ import {
   deleteLecturer,
   deleteSourceWorkbook,
   renameLecturer,
+  resetAndRecreateGroupsFromSource,
   updateSourceWorkbookAdvisors,
 } from "../store/actions";
 import { createEmptyData } from "../store/store";
@@ -546,5 +547,67 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
     const deleted = deleteLecturer(dataWithLec, scenario.batch.id, "lec_test_unused");
     expect(deleted.error).toBeUndefined();
     expect(deleted.data.lecturers.find((l) => l.id === "lec_test_unused")).toBeUndefined();
+  });
+
+  it("phân tách nhóm chính xác khi nhiều bảng điểm có cùng mã nhóm (không bị gộp nhầm thành ít nhóm hơn)", () => {
+    const batch = makeTestBatch("Đợt 3 Bảng Điểm");
+    let data = addBatch(createEmptyData(), batch);
+
+    // Tạo 3 bảng điểm (Lớp 21.11, Lớp 21.12, Lớp 21.13)
+    // Mỗi lớp đều có Nhóm 1 và Nhóm 2 -> Tổng cộng phải là 6 nhóm độc lập
+    const students = [
+      // Bảng điểm 1
+      { mssv: "101", name: "SV 1A", className: "21Nh11", courseCode: "21.11", groupCode: "1", advisorName: "GVHD A", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "102", name: "SV 2A", className: "21Nh11", courseCode: "21.11", groupCode: "2", advisorName: "GVHD A", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
+      // Bảng điểm 2
+      { mssv: "201", name: "SV 1B", className: "21Nh12", courseCode: "21.12", groupCode: "1", advisorName: "GVHD B", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "202", name: "SV 2B", className: "21Nh12", courseCode: "21.12", groupCode: "2", advisorName: "GVHD B", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
+      // Bảng điểm 3
+      { mssv: "301", name: "SV 1C", className: "21Nh13", courseCode: "21.13", groupCode: "1", advisorName: "GVHD C", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "302", name: "SV 2C", className: "21Nh13", courseCode: "21.13", groupCode: "2", advisorName: "GVHD C", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
+    ];
+
+    const wb1: PendingWorkbook = {
+      tempId: "p1", fileName: "LHP_21.11.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
+      headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
+      rows: students.slice(0, 2), metaCourseCode: "21.11", metaLecturerName: "GVHD A", errors: [], warnings: [],
+    };
+    const wb2: PendingWorkbook = {
+      tempId: "p2", fileName: "LHP_21.12.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
+      headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
+      rows: students.slice(2, 4), metaCourseCode: "21.12", metaLecturerName: "GVHD B", errors: [], warnings: [],
+    };
+    const wb3: PendingWorkbook = {
+      tempId: "p3", fileName: "LHP_21.13.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
+      headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
+      rows: students.slice(4, 6), metaCourseCode: "21.13", metaLecturerName: "GVHD C", errors: [], warnings: [],
+    };
+
+    const commitRes = commitSourceWorkbooks(data, batch.id, [wb1, wb2, wb3]);
+    expect(commitRes.error).toBeUndefined();
+    data = commitRes.data;
+
+    // Tự động tạo nhóm từ nguồn
+    const autoRes = autoCreateGroupsFromSource(data, batch.id);
+    expect(autoRes.createdCount).toBe(6); // Đúng 6 nhóm (không bị gộp thành 2 nhóm!)
+    data = autoRes.data;
+
+    const batchGroups = data.groups.filter((g) => g.batchId === batch.id);
+    expect(batchGroups).toHaveLength(6);
+
+    // Kiểm tra tên nhóm được gắn tiền tố mã học phần rõ ràng
+    const groupCodes = batchGroups.map((g) => g.groupCode).sort();
+    expect(groupCodes).toContain("21.11 - Nhóm 1");
+    expect(groupCodes).toContain("21.11 - Nhóm 2");
+    expect(groupCodes).toContain("21.12 - Nhóm 1");
+    expect(groupCodes).toContain("21.12 - Nhóm 2");
+    expect(groupCodes).toContain("21.13 - Nhóm 1");
+    expect(groupCodes).toContain("21.13 - Nhóm 2");
+
+    // Kiểm tra tính năng reset và làm mới lại nhóm
+    const resetRes = resetAndRecreateGroupsFromSource(data, batch.id);
+    expect(resetRes.error).toBeUndefined();
+    expect(resetRes.createdCount).toBe(6);
+    expect(resetRes.data.groups.filter((g) => g.batchId === batch.id)).toHaveLength(6);
   });
 });

@@ -13,6 +13,7 @@ import {
   createGroup,
   deleteGroup,
   removeGroupMember,
+  resetAndRecreateGroupsFromSource,
   updateGroup,
   updateLecturer,
   updateMemberOverride,
@@ -81,6 +82,29 @@ export function GroupsPage({
           const groups = groupViews.filter(
             (view) => view.group.graderId === lecturer.id,
           );
+          // Gom cụm theo bảng điểm
+          const wbMap = new Map<string, { label: string; count: number }>();
+          for (const view of groups) {
+            const wbId =
+              view.members[0]?.student.sourceWorkbookId ||
+              context.students.find((s) =>
+                context.members.some(
+                  (m) => m.groupId === view.group.id && m.studentId === s.id,
+                ),
+              )?.sourceWorkbookId;
+            const wb = wbId ? workbookById.get(wbId) : null;
+            const label = wb
+              ? wb.metaCourseCode || wb.fileName.replace(/\.(xlsx|xls)$/i, "")
+              : "Khác";
+            const key = wbId || "unknown";
+            const existing = wbMap.get(key);
+            if (existing) {
+              existing.count += 1;
+            } else {
+              wbMap.set(key, { label, count: 1 });
+            }
+          }
+
           return {
             lecturer,
             groupCount: groups.length,
@@ -88,10 +112,11 @@ export function GroupsPage({
               (total, view) => total + view.studentCount,
               0,
             ),
+            workbooks: Array.from(wbMap.values()),
           };
         })
         .sort((a, b) => b.studentCount - a.studentCount),
-    [activeLecturers, groupViews],
+    [activeLecturers, groupViews, context.students, context.members, workbookById],
   );
 
   const hasNoEligibleGrader = useMemo(() => {
@@ -211,6 +236,13 @@ export function GroupsPage({
           currentData.lecturers,
           currentData.sourceWorkbooks,
         ),
+        sourceWorkbookId:
+          view.members[0]?.student.sourceWorkbookId ||
+          currentData.students.find((s) =>
+            currentData.members.some(
+              (m) => m.groupId === view.group.id && m.studentId === s.id,
+            ),
+          )?.sourceWorkbookId,
       })),
       activeIds,
       mode,
@@ -356,13 +388,14 @@ export function GroupsPage({
                 <th>Phòng chấm</th>
                 <th>Số nhóm phụ trách</th>
                 <th>Số sinh viên phụ trách</th>
+                <th>Bảng điểm phụ trách</th>
               </tr>
             </thead>
             <tbody>
               {workload.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     style={{
                       textAlign: "center",
                       padding: "16px",
@@ -404,6 +437,22 @@ export function GroupsPage({
                       <Badge tone={row.studentCount > 0 ? "purple" : "neutral"}>
                         {row.studentCount} SV
                       </Badge>
+                    </td>
+                    <td>
+                      {row.workbooks.length === 0 ? (
+                        <span className="muted">—</span>
+                      ) : (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                          {row.workbooks.map((wb, idx) => (
+                            <Badge
+                              key={idx}
+                              tone={row.workbooks.length === 1 ? "success" : "info"}
+                            >
+                              {wb.label} ({wb.count} nhóm)
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))
@@ -514,7 +563,36 @@ export function GroupsPage({
       </section>
 
       <section className="panel">
-        <h2>Danh sách nhóm ({groupViews.length})</h2>
+        <div className="panel-header">
+          <div>
+            <h2>Danh sách nhóm ({groupViews.length})</h2>
+            <p className="muted">
+              Quản lý thành viên từng nhóm và phân công giảng viên chấm cụ thể.
+            </p>
+          </div>
+          {context.sourceWorkbooks.length > 0 ? (
+            <button
+              type="button"
+              className="button small secondary"
+              title="Xóa danh sách nhóm hiện tại và gom nhóm tự động chuẩn theo từng file/bảng điểm nguồn"
+              onClick={() => {
+                const ok = window.confirm(
+                  `Bạn có chắc chắn muốn làm mới và tạo lại toàn bộ nhóm từ file nguồn Excel?\n\nThao tác này sẽ phân nhóm lại chính xác theo từng bảng điểm (giúp khắc phục lỗi bị gộp nhầm nhóm giữa các bảng điểm khác nhau).`,
+                );
+                if (!ok) return;
+                const res = resetAndRecreateGroupsFromSource(data, batch.id);
+                if (res.error) {
+                  onNotice("danger", res.error);
+                } else {
+                  setData(res.data);
+                  onNotice("success", res.message ?? "Đã làm mới và tạo lại nhóm thành công.");
+                }
+              }}
+            >
+              🔄 Làm mới &amp; tạo lại nhóm từ file nguồn
+            </button>
+          ) : null}
+        </div>
         {groupViews.length === 0 ? (
           <EmptyState title="Chưa có nhóm PBL">Tạo nhóm ở phía trên.</EmptyState>
         ) : (
