@@ -24,7 +24,7 @@ import {
 import { createEmptyData } from "../store/store";
 import { buildScenario } from "../test/scenario";
 import { arrayBufferToBase64 } from "../utils/base64";
-import type { PendingWorkbook } from "../types";
+import type { ParsedStudentRow, PendingWorkbook } from "../types";
 import {
   makeSourceWorkbook,
   makeTestBatch,
@@ -598,27 +598,92 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
     const batchGroups = data.groups.filter((g) => g.batchId === batch.id);
     expect(batchGroups).toHaveLength(6);
 
-    // Kiểm tra tên nhóm được gắn tiền tố GVHD theo chuẩn mới (T.A_N01, T.B_N01,...)
+    // Kiểm tra tên nhóm được gắn tiền tố GVHD + Lớp theo chuẩn mới (T.A_11_N01, T.B_12_N01,...)
     const groupCodes = batchGroups.map((g) => g.groupCode).sort();
-    expect(groupCodes).toContain("T.A_N01");
-    expect(groupCodes).toContain("T.A_N02");
-    expect(groupCodes).toContain("T.B_N01");
-    expect(groupCodes).toContain("T.B_N02");
-    expect(groupCodes).toContain("T.C_N01");
-    expect(groupCodes).toContain("T.C_N02");
+    expect(groupCodes).toContain("T.A_11_N01");
+    expect(groupCodes).toContain("T.A_11_N02");
+    expect(groupCodes).toContain("T.B_12_N01");
+    expect(groupCodes).toContain("T.B_12_N02");
+    expect(groupCodes).toContain("T.C_13_N01");
+    expect(groupCodes).toContain("T.C_13_N02");
 
     // Kiểm tra đổi tiền tố nhóm cho bảng điểm (updateSourceWorkbookPrefix)
     const wb1Id = data.sourceWorkbooks.find((w) => w.fileName === "LHP_21.11.xlsx")!.id;
-    const updatePrefixRes = updateSourceWorkbookPrefix(data, batch.id, wb1Id, "T.Thanh_T.Tung");
+    const updatePrefixRes = updateSourceWorkbookPrefix(data, batch.id, wb1Id, "T.Thanh_T.Tung_40");
     expect(updatePrefixRes.error).toBeUndefined();
     data = updatePrefixRes.data;
     const updatedCodes = data.groups.filter((g) => g.batchId === batch.id).map((g) => g.groupCode).sort();
-    expect(updatedCodes).toContain("T.Thanh_T.Tung_N01");
-    expect(updatedCodes).toContain("T.Thanh_T.Tung_N02");
+    expect(updatedCodes).toContain("T.Thanh_T.Tung_40_N01");
+    expect(updatedCodes).toContain("T.Thanh_T.Tung_40_N02");
 
     // Kiểm tra tính năng reset và làm mới lại nhóm
     const resetRes = resetAndRecreateGroupsFromSource(data, batch.id);
     expect(resetRes.error).toBeUndefined();
+    expect(resetRes.createdCount).toBe(6);
+    expect(resetRes.data.groups.filter((g) => g.batchId === batch.id)).toHaveLength(6);
+  });
+
+  it("một giảng viên hướng dẫn nhiều bảng điểm (T. Nam: 41, 39B; Tùng & Thanh: 40) không bị trùng hay gộp nhóm", () => {
+    let data = createEmptyData();
+    const batch = makeTestBatch();
+    data = addBatch(data, batch);
+
+    // 6 sinh viên: 2 SV lớp 41 (T. Nam), 2 SV lớp 39B (T. Nam), 2 SV lớp 40 (Tùng & Thanh)
+    // Cả 3 file đều có nhóm 'N01' và 'N02'
+    const students: ParsedStudentRow[] = [
+      { sourceRowNumber: 2, mssv: "101", name: "SV 1", className: "", courseCode: "106337026102441", courseName: "PBL", groupCode: "N01", advisorName: "Nguyễn Văn Nam", originalRowData: [], errors: [], warnings: [] },
+      { sourceRowNumber: 3, mssv: "102", name: "SV 2", className: "", courseCode: "106337026102441", courseName: "PBL", groupCode: "N02", advisorName: "Nguyễn Văn Nam", originalRowData: [], errors: [], warnings: [] },
+      { sourceRowNumber: 2, mssv: "201", name: "SV 3", className: "", courseCode: "106337026102439B", courseName: "PBL", groupCode: "N01", advisorName: "Nguyễn Văn Nam", originalRowData: [], errors: [], warnings: [] },
+      { sourceRowNumber: 3, mssv: "202", name: "SV 4", className: "", courseCode: "106337026102439B", courseName: "PBL", groupCode: "N02", advisorName: "Nguyễn Văn Nam", originalRowData: [], errors: [], warnings: [] },
+      { sourceRowNumber: 2, mssv: "301", name: "SV 5", className: "", courseCode: "106337026102440", courseName: "PBL", groupCode: "N01", advisorName: "Huỳnh Thanh Tùng, Trần Văn Thanh", originalRowData: [], errors: [], warnings: [] },
+      { sourceRowNumber: 3, mssv: "302", name: "SV 6", className: "", courseCode: "106337026102440", courseName: "PBL", groupCode: "N02", advisorName: "Huỳnh Thanh Tùng, Trần Văn Thanh", originalRowData: [], errors: [], warnings: [] },
+    ];
+
+    const wb1: PendingWorkbook = {
+      tempId: "p1", fileName: "106337026102441-_DSTS.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
+      headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
+      rows: students.slice(0, 2), metaCourseCode: "106337026102441", metaCourseName: "PBL", metaLecturerName: "Nguyễn Văn Nam", errors: [], warnings: [],
+    };
+    const wb2: PendingWorkbook = {
+      tempId: "p2", fileName: "106337026102439B-_DSTS.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
+      headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
+      rows: students.slice(2, 4), metaCourseCode: "106337026102439B", metaCourseName: "PBL", metaLecturerName: "Nguyễn Văn Nam", errors: [], warnings: [],
+    };
+    const wb3: PendingWorkbook = {
+      tempId: "p3", fileName: "106337026102440-_DSTS.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
+      headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
+      rows: students.slice(4, 6), metaCourseCode: "106337026102440", metaCourseName: "PBL", metaLecturerName: "Huỳnh Thanh Tùng, Trần Văn Thanh", metaLecturerNames: ["Huỳnh Thanh Tùng", "Trần Văn Thanh"], errors: [], warnings: [],
+    };
+
+    const commitRes = commitSourceWorkbooks(data, batch.id, [wb1, wb2, wb3]);
+    expect(commitRes.error).toBeUndefined();
+    data = commitRes.data;
+
+    // Kiểm tra tiền tố tự động sinh cho từng bảng điểm
+    const committedWb1 = data.sourceWorkbooks.find((w) => w.fileName.includes("41"))!;
+    const committedWb2 = data.sourceWorkbooks.find((w) => w.fileName.includes("39B"))!;
+    const committedWb3 = data.sourceWorkbooks.find((w) => w.fileName.includes("40"))!;
+    expect(committedWb1.groupPrefix).toBe("T.Nam_41");
+    expect(committedWb2.groupPrefix).toBe("T.Nam_39B");
+    expect(committedWb3.groupPrefix).toBe("T.Tung_T.Thanh_40");
+
+    // Tạo nhóm tự động
+    const autoRes = autoCreateGroupsFromSource(data, batch.id);
+    expect(autoRes.createdCount).toBe(6); // Phải đủ 6 nhóm, không được gộp nhầm do trùng T.Nam!
+    data = autoRes.data;
+
+    const codes = data.groups.filter((g) => g.batchId === batch.id).map((g) => g.groupCode).sort();
+    expect(codes).toEqual([
+      "T.Nam_39B_N01",
+      "T.Nam_39B_N02",
+      "T.Nam_41_N01",
+      "T.Nam_41_N02",
+      "T.Tung_T.Thanh_40_N01",
+      "T.Tung_T.Thanh_40_N02",
+    ]);
+
+    // Kiểm tra reset và làm mới lại nhóm
+    const resetRes = resetAndRecreateGroupsFromSource(data, batch.id);
     expect(resetRes.createdCount).toBe(6);
     expect(resetRes.data.groups.filter((g) => g.batchId === batch.id)).toHaveLength(6);
   });

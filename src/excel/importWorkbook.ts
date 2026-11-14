@@ -10,6 +10,7 @@ import { arrayBufferToBase64, base64ToArrayBuffer } from "../utils/base64";
 import { createId } from "../utils/id";
 import {
   cellText,
+  extractClassOrCourseSuffix,
   generateScorecardPrefix,
   isBlankRow,
   normalizeText,
@@ -913,8 +914,8 @@ export function analyzeWorkbook(options: AnalyzeOptions): AnalyzeResult {
     metaLecturerName,
     metaLecturerNames,
     groupPrefix:
-      generateScorecardPrefix(metaLecturerNames) ||
-      (metaCourseCode ? `L_${metaCourseCode}` : undefined),
+      generateScorecardPrefix(metaLecturerNames, metaCourseCode || options.fileName) ||
+      (metaCourseCode ? `L_${extractClassOrCourseSuffix(metaCourseCode) || metaCourseCode}` : undefined),
     sourceTemplate,
     errors: parsed.errors,
     warnings: parsed.warnings,
@@ -1046,7 +1047,10 @@ export function mergeDuplicatePendingWorkbooks(
           workbook.metaLecturerNames.length > 0
         ) {
           targetWb.metaLecturerNames = [...workbook.metaLecturerNames];
-          targetWb.groupPrefix = generateScorecardPrefix(targetWb.metaLecturerNames);
+          targetWb.groupPrefix = generateScorecardPrefix(
+            targetWb.metaLecturerNames,
+            targetWb.metaCourseCode || targetWb.fileName,
+          );
         }
       }
     }

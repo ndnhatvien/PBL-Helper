@@ -39,13 +39,62 @@ export function getLecturerCallName(fullName: string): string {
 }
 
 /**
- * Tạo tiền tố ngắn gọn cho bảng điểm theo GVHD (VD: ["Trần Văn Thanh", "Huỳnh Thanh Tùng"] -> "T.Thanh_T.Tung")
+ * Trích xuất hậu tố mã lớp/học phần: 2 chữ số cuối + 1 chữ cái (nếu có)
+ * Ví dụ:
+ * - "106337026102438A" -> "38A"
+ * - "106337026102440" -> "40"
+ * - "21.11" -> "11"
+ * - "21.39B" -> "39B"
+ * - "21.41" -> "41"
+ * - "106337026102438A-_DSTS.xlsx" -> "38A"
  */
-export function generateScorecardPrefix(advisorNames?: string[] | null): string {
-  if (!advisorNames || advisorNames.length === 0) return "";
-  const valid = advisorNames.map((n) => n.trim()).filter(Boolean);
-  if (valid.length === 0) return "";
-  return valid.map((name) => `T.${getLecturerCallName(name)}`).join("_");
+export function extractClassOrCourseSuffix(str?: string | null): string {
+  if (!str) return "";
+  let clean = String(str).replace(/\.(xlsx|xls)$/i, "").trim();
+  clean = clean.replace(/[-_]+(DSTS|dsts|bang[_-]?diem|CK)[-_]*$/i, "").trim();
+
+  // 1. Kiểm tra ở cuối chuỗi: 2 chữ số cuối + 1 chữ cái (nếu có)
+  const mEnd = clean.match(/(\d{2}[A-Za-z]?)[^0-9A-Za-z]*$/);
+  if (mEnd) return mEnd[1].toUpperCase();
+
+  // 2. Tìm bất kỳ cụm 2 chữ số + 1 chữ cái có phân tách rõ ràng
+  const mMid = clean.match(/(?:^|[._\-\s]|lop|nhom)(\d{2}[A-Za-z]?)(?:[._\-\s]|$)/i);
+  if (mMid) return mMid[1].toUpperCase();
+
+  return "";
+}
+
+/**
+ * Tạo tiền tố ngắn gọn cho bảng điểm theo GVHD + Hậu tố lớp (2 chữ số cuối + 1 chữ cái nếu có)
+ * Ví dụ:
+ * - ["Nguyễn Văn Nam"] + "106337026102441" -> "T.Nam_41"
+ * - ["Nguyễn Văn Nam"] + "106337026102439B" -> "T.Nam_39B"
+ * - ["Huỳnh Thanh Tùng", "Trần Văn Thanh"] + "106337026102440" -> "T.Tung_T.Thanh_40"
+ */
+export function generateScorecardPrefix(
+  advisorNames?: string[] | null,
+  classOrCourseCode?: string | null,
+): string {
+  const advisorPart = (advisorNames && advisorNames.length > 0)
+    ? advisorNames
+        .map((n) => n.trim())
+        .filter(Boolean)
+        .map((name) => `T.${getLecturerCallName(name)}`)
+        .join("_")
+    : "";
+
+  const classSuffix = extractClassOrCourseSuffix(classOrCourseCode);
+
+  if (advisorPart && classSuffix) {
+    return `${advisorPart}_${classSuffix}`;
+  }
+  if (advisorPart) {
+    return advisorPart;
+  }
+  if (classSuffix) {
+    return `L_${classSuffix}`;
+  }
+  return "";
 }
 
 /**

@@ -21,6 +21,7 @@ import {
 export { splitLecturerNames };
 import { createId, nowIso } from "../utils/id";
 import {
+  extractClassOrCourseSuffix,
   formatAdvisorGroupCode,
   generateScorecardPrefix,
   normalizeRawGroupCode,
@@ -498,8 +499,8 @@ export function commitSourceWorkbooks(
       metaLecturerNames: workbookLecturerNames,
       groupPrefix:
         pending.groupPrefix?.trim() ||
-        generateScorecardPrefix(workbookLecturerNames) ||
-        (pending.metaCourseCode ? `L_${pending.metaCourseCode}` : ""),
+        generateScorecardPrefix(workbookLecturerNames, pending.metaCourseCode || pending.fileName) ||
+        (pending.metaCourseCode ? `L_${extractClassOrCourseSuffix(pending.metaCourseCode) || pending.metaCourseCode}` : ""),
       sourceTemplate: pending.sourceTemplate ?? "custom",
     };
     newWorkbooks.push(workbook);
@@ -588,7 +589,7 @@ export function getScorecardGroupPrefix(wb?: SourceWorkbook | null): string {
     : wb.metaLecturerName
       ? splitLecturerNames(wb.metaLecturerName)
       : [];
-  const advPrefix = generateScorecardPrefix(advNames);
+  const advPrefix = generateScorecardPrefix(advNames, wb.metaCourseCode || wb.fileName);
   if (advPrefix) return advPrefix;
   return getWorkbookLabel(wb);
 }
@@ -621,11 +622,10 @@ export function updateSourceWorkbookPrefix(
   const updatedGroups = data.groups.map((group) => {
     if (group.batchId !== batchId) return group;
     if (group.sourceWorkbookId !== workbookId) return group;
-    const subCode = group.groupCode.includes("_")
-      ? group.groupCode.split("_").slice(1).join("_")
-      : group.groupCode.includes("-")
-        ? group.groupCode.split("-").slice(1).join("-").trim()
-        : group.groupCode;
+    const match =
+      group.groupCode.match(/_(N\d+|[A-Za-z0-9]+)$/i) ||
+      group.groupCode.match(/-\s*([A-Za-z0-9\s]+)$/);
+    const subCode = match ? match[1].trim() : group.groupCode;
     const nextCode = cleanPrefix
       ? `${cleanPrefix}_${normalizeRawGroupCode(subCode)}`
       : normalizeRawGroupCode(subCode);
@@ -854,20 +854,13 @@ export function autoCreateGroupsFromSource(
   let createdCount = 0;
 
   for (const [, { sourceWorkbookId, rawCode, finalGroupCode, students }] of grouped.entries()) {
-    // Tìm nhóm đã tồn tại trong đợt phù hợp với bảng điểm này
+    // Tìm nhóm đã tồn tại trong đợt phù hợp CHÍNH XÁC với bảng điểm này
     const existingGroup = nextData.groups.find(
       (g) =>
         g.batchId === batchId &&
-        ((g.sourceWorkbookId === sourceWorkbookId &&
-          g.groupCode.toLowerCase() === finalGroupCode.toLowerCase()) ||
-          g.groupCode.toLowerCase() === finalGroupCode.toLowerCase() ||
-          // Hoặc khớp mã nhóm gốc VÀ có thành viên cùng sourceWorkbookId
-          (g.groupCode.toLowerCase() === rawCode.toLowerCase() &&
-            nextData.members.some((m) => {
-              if (m.groupId !== g.id) return false;
-              const stu = nextData.students.find((st) => st.id === m.studentId);
-              return stu?.sourceWorkbookId === sourceWorkbookId;
-            }))),
+        g.sourceWorkbookId === sourceWorkbookId &&
+        (g.groupCode.toLowerCase() === finalGroupCode.toLowerCase() ||
+          g.groupCode.toLowerCase() === rawCode.toLowerCase()),
     );
 
     if (existingGroup) {
@@ -919,10 +912,24 @@ export function autoCreateGroupsFromSource(
         }
       }
 
+      // Đảm bảo uniqueGroupCode là duy nhất trong đợt, tránh va chạm tên giữa các bảng điểm
+      let uniqueGroupCode = finalGroupCode;
+      let suffixIdx = 2;
+      while (
+        nextData.groups.some(
+          (g) =>
+            g.batchId === batchId &&
+            g.groupCode.toLowerCase() === uniqueGroupCode.toLowerCase(),
+        )
+      ) {
+        uniqueGroupCode = `${finalGroupCode}_${suffixIdx}`;
+        suffixIdx += 1;
+      }
+
       const createResult = createGroup(
         nextData,
         batchId,
-        finalGroupCode,
+        uniqueGroupCode,
         students.map((s) => s.id),
         defaultAdvisorId,
         sourceWorkbookId,

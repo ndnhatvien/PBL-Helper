@@ -254,11 +254,17 @@ export function ImportPage({
   ) {
     const validAdvisors = nextAdvisors.map((n) => n.trim()).filter(Boolean);
     const combinedName = validAdvisors.join(", ") || null;
-    const autoPrefix = generateScorecardPrefix(validAdvisors);
+    const autoPrefix = generateScorecardPrefix(
+      validAdvisors,
+      workbook.metaCourseCode || workbook.fileName,
+    );
     setPending((previous) =>
       previous.map((item) => {
         if (item.tempId !== workbook.tempId) return item;
-        const prevAuto = generateScorecardPrefix(item.metaLecturerNames);
+        const prevAuto = generateScorecardPrefix(
+          item.metaLecturerNames,
+          item.metaCourseCode || item.fileName,
+        );
         const shouldUpdatePrefix = !item.groupPrefix || item.groupPrefix === prevAuto;
         return {
           ...item,
@@ -308,7 +314,11 @@ export function ImportPage({
         : [];
     setEditingWorkbook(wb);
     setEditingAdvisors(list.length > 0 ? list : [""]);
-    setEditingPrefix(wb.groupPrefix || generateScorecardPrefix(list) || "");
+    setEditingPrefix(
+      wb.groupPrefix ||
+        generateScorecardPrefix(list, wb.metaCourseCode || wb.fileName) ||
+        "",
+    );
   }
 
   function handleSaveWorkbookAdvisors() {
@@ -884,11 +894,18 @@ export function ImportPage({
                       className="button small ghost"
                       style={{ fontSize: "0.8rem", padding: "2px 8px" }}
                       onClick={() => {
-                        const auto = generateScorecardPrefix(editingAdvisors);
+                        const auto = generateScorecardPrefix(
+                          editingAdvisors,
+                          editingWorkbook?.metaCourseCode || editingWorkbook?.fileName,
+                        );
                         if (auto) setEditingPrefix(auto);
                       }}
                     >
-                      ⚡ Lấy theo GVHD: {generateScorecardPrefix(editingAdvisors) || "—"}
+                      ⚡ Lấy theo GVHD & Lớp:{" "}
+                      {generateScorecardPrefix(
+                        editingAdvisors,
+                        editingWorkbook?.metaCourseCode || editingWorkbook?.fileName,
+                      ) || "—"}
                     </button>
                   </div>
                   <input
