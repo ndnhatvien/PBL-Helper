@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { ExamBatch, GroupView } from "../types";
+import type { ExamBatch, GroupView, Lecturer, SourceWorkbook } from "../types";
 import type { AppData } from "../store/store";
 import type { BatchContext } from "../domain/selectors";
 import { filterBatchContext, getAvailableStudents, getGroupViews } from "../domain/selectors";
@@ -61,6 +61,9 @@ export function GroupsPage({
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [mode, setMode] = useState<BalanceMode>("groups");
   const [filterWorkbookId, setFilterWorkbookId] = useState<string>("all");
+  const [selectedLecturerTab, setSelectedLecturerTab] = useState<string>("all");
+  const [viewLayout, setViewLayout] = useState<"lecturers" | "flat">("lecturers");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const availableStudents = useMemo(() => getAvailableStudents(context), [context]);
   const availableWithGroup = useMemo(
@@ -79,19 +82,81 @@ export function GroupsPage({
   );
 
   const displayedGroupViews = useMemo(() => {
-    if (filterWorkbookId === "all") return groupViews;
-    return groupViews.filter((view) => {
-      const wbId =
-        view.group.sourceWorkbookId ||
-        view.members[0]?.student.sourceWorkbookId ||
-        context.students.find((s) =>
-          context.members.some(
-            (m) => m.groupId === view.group.id && m.studentId === s.id,
-          ),
-        )?.sourceWorkbookId;
-      return wbId === filterWorkbookId;
+    let list = groupViews;
+    if (filterWorkbookId !== "all") {
+      list = list.filter((view) => {
+        const wbId =
+          view.group.sourceWorkbookId ||
+          view.members[0]?.student.sourceWorkbookId ||
+          context.students.find((s) =>
+            context.members.some(
+              (m) => m.groupId === view.group.id && m.studentId === s.id,
+            ),
+          )?.sourceWorkbookId;
+        return wbId === filterWorkbookId;
+      });
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      list = list.filter((view) => {
+        if (view.group.groupCode.toLowerCase().includes(q)) return true;
+        return view.members.some(
+          (m) =>
+            m.student.name.toLowerCase().includes(q) ||
+            m.student.mssv.toLowerCase().includes(q),
+        );
+      });
+    }
+    return list;
+  }, [groupViews, filterWorkbookId, searchQuery, context.students, context.members]);
+
+  // Gom nhóm danh sách theo từng giảng viên chấm để hiển thị các panel riêng có thanh cuộn
+  const lecturerSections = useMemo(() => {
+    const sections = activeLecturers.map((lecturer) => {
+      const groups = displayedGroupViews.filter(
+        (view) => view.group.graderId === lecturer.id,
+      );
+      const wbMap = new Map<string, { label: string; count: number }>();
+      for (const view of groups) {
+        const wbId =
+          view.group.sourceWorkbookId ||
+          view.members[0]?.student.sourceWorkbookId ||
+          context.students.find((s) =>
+            context.members.some(
+              (m) => m.groupId === view.group.id && m.studentId === s.id,
+            ),
+          )?.sourceWorkbookId;
+        const wb = wbId ? workbookById.get(wbId) : null;
+        const label = wb
+          ? wb.groupPrefix
+            ? `${wb.groupPrefix} (${getWorkbookLabel(wb)})`
+            : getWorkbookLabel(wb)
+          : "Khác";
+        const key = wbId || "unknown";
+        const existing = wbMap.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          wbMap.set(key, { label, count: 1 });
+        }
+      }
+      return {
+        lecturer,
+        groups,
+        studentCount: groups.reduce((sum, v) => sum + v.studentCount, 0),
+        workbooks: Array.from(wbMap.values()),
+      };
     });
-  }, [groupViews, filterWorkbookId, context.students, context.members]);
+
+    const unassignedGroups = displayedGroupViews.filter(
+      (view) => !view.group.graderId,
+    );
+
+    return {
+      lecturerSections: sections,
+      unassignedGroups,
+    };
+  }, [activeLecturers, displayedGroupViews, context.students, context.members, workbookById]);
 
   const workload = useMemo(
     () =>
@@ -620,12 +685,13 @@ export function GroupsPage({
             </button>
           ) : null}
         </div>
-        {context.sourceWorkbooks.length > 1 && groupViews.length > 0 ? (
+        {/* Toolbar: Tìm kiếm, Lọc bảng điểm & Chuyển đổi hiển thị */}
+        {groupViews.length > 0 ? (
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: "8px",
+              gap: "10px",
               flexWrap: "wrap",
               margin: "8px 0 16px 0",
               padding: "10px 14px",
@@ -634,44 +700,172 @@ export function GroupsPage({
               border: "1px solid var(--border-soft)",
             }}
           >
-            <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>
-              📋 Lọc theo bảng điểm:
-            </span>
-            <select
-              value={filterWorkbookId}
-              onChange={(e) => setFilterWorkbookId(e.target.value)}
-              style={{
-                padding: "6px 12px",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                fontSize: "0.88rem",
-                background: "var(--surface)",
-              }}
-            >
-              <option value="all">
-                Tất cả bảng điểm ({groupViews.length} nhóm)
-              </option>
-              {context.sourceWorkbooks.map((w) => {
-                const count = groupViews.filter((v) => {
-                  const wid =
-                    v.group.sourceWorkbookId ||
-                    v.members[0]?.student.sourceWorkbookId;
-                  return wid === w.id;
-                }).length;
-                return (
-                  <option key={w.id} value={w.id}>
-                    {w.groupPrefix ? `${w.groupPrefix} (${getWorkbookLabel(w)})` : getWorkbookLabel(w)} ({count} nhóm)
+            {/* Ô tìm kiếm nhanh */}
+            <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: 1, minWidth: "220px" }}>
+              <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>🔍 Tìm:</span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Mã nhóm, tên hoặc MSSV..."
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--border)",
+                  fontSize: "0.88rem",
+                  width: "100%",
+                  background: "var(--surface)",
+                }}
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  className="button small ghost"
+                  onClick={() => setSearchQuery("")}
+                  title="Xóa tìm kiếm"
+                >
+                  ✕
+                </button>
+              ) : null}
+            </div>
+
+            {/* Lọc theo bảng điểm */}
+            {context.sourceWorkbooks.length > 1 ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>📋 Bảng điểm:</span>
+                <select
+                  value={filterWorkbookId}
+                  onChange={(e) => setFilterWorkbookId(e.target.value)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--border)",
+                    fontSize: "0.88rem",
+                    background: "var(--surface)",
+                  }}
+                >
+                  <option value="all">
+                    Tất cả bảng điểm ({groupViews.length} nhóm)
                   </option>
-                );
-              })}
-            </select>
-            {filterWorkbookId !== "all" ? (
+                  {context.sourceWorkbooks.map((w) => {
+                    const count = groupViews.filter((v) => {
+                      const wid =
+                        v.group.sourceWorkbookId ||
+                        v.members[0]?.student.sourceWorkbookId;
+                      return wid === w.id;
+                    }).length;
+                    return (
+                      <option key={w.id} value={w.id}>
+                        {w.groupPrefix ? `${w.groupPrefix} (${getWorkbookLabel(w)})` : getWorkbookLabel(w)} ({count} nhóm)
+                      </option>
+                    );
+                  })}
+                </select>
+                {filterWorkbookId !== "all" ? (
+                  <button
+                    type="button"
+                    className="button small ghost"
+                    onClick={() => setFilterWorkbookId("all")}
+                    title="Xem tất cả bảng điểm"
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
+            {/* Chế độ xem: Theo từng giảng viên vs Danh sách phẳng */}
+            <div style={{ display: "flex", gap: "6px", marginLeft: "auto" }}>
               <button
                 type="button"
-                className="button small ghost"
-                onClick={() => setFilterWorkbookId("all")}
+                className={`button small ${viewLayout === "lecturers" ? "" : "ghost"}`}
+                style={{
+                  background: viewLayout === "lecturers" ? "var(--teal)" : "transparent",
+                  color: viewLayout === "lecturers" ? "#ffffff" : "inherit",
+                }}
+                title="Chia theo từng giảng viên, mỗi thầy/cô 1 panel cuộn riêng"
+                onClick={() => setViewLayout("lecturers")}
               >
-                ✕ Xem tất cả
+                🗂️ Panel theo GV
+              </button>
+              <button
+                type="button"
+                className={`button small ${viewLayout === "flat" ? "" : "ghost"}`}
+                style={{
+                  background: viewLayout === "flat" ? "var(--teal)" : "transparent",
+                  color: viewLayout === "flat" ? "#ffffff" : "inherit",
+                }}
+                title="Danh sách phẳng truyền thống"
+                onClick={() => setViewLayout("flat")}
+              >
+                📋 Danh sách phẳng
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Thanh tab chọn nhanh giảng viên khi ở chế độ xem Panel */}
+        {viewLayout === "lecturers" && groupViews.length > 0 && activeLecturers.length > 0 ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              flexWrap: "wrap",
+              marginBottom: "16px",
+              paddingBottom: "8px",
+              borderBottom: "1px dashed var(--border-soft)",
+            }}
+          >
+            <span style={{ fontSize: "0.85rem", color: "var(--muted)", marginRight: "4px" }}>
+              Xem nhanh:
+            </span>
+            <button
+              type="button"
+              className={`button small ${selectedLecturerTab === "all" ? "" : "ghost"}`}
+              style={{
+                borderRadius: "16px",
+                padding: "3px 10px",
+                fontSize: "0.82rem",
+                background: selectedLecturerTab === "all" ? "var(--navy)" : "var(--surface-sunken)",
+                color: selectedLecturerTab === "all" ? "#fff" : "inherit",
+              }}
+              onClick={() => setSelectedLecturerTab("all")}
+            >
+              Tất cả GV ({activeLecturers.length})
+            </button>
+            {lecturerSections.lecturerSections.map(({ lecturer, groups }) => (
+              <button
+                key={lecturer.id}
+                type="button"
+                className={`button small ${selectedLecturerTab === lecturer.id ? "" : "ghost"}`}
+                style={{
+                  borderRadius: "16px",
+                  padding: "3px 10px",
+                  fontSize: "0.82rem",
+                  background: selectedLecturerTab === lecturer.id ? "var(--teal)" : "var(--surface-sunken)",
+                  color: selectedLecturerTab === lecturer.id ? "#fff" : "inherit",
+                }}
+                onClick={() => setSelectedLecturerTab(lecturer.id)}
+              >
+                {lecturer.displayName} ({groups.length})
+              </button>
+            ))}
+            {lecturerSections.unassignedGroups.length > 0 ? (
+              <button
+                type="button"
+                className={`button small ${selectedLecturerTab === "unassigned" ? "" : "ghost"}`}
+                style={{
+                  borderRadius: "16px",
+                  padding: "3px 10px",
+                  fontSize: "0.82rem",
+                  background: selectedLecturerTab === "unassigned" ? "var(--amber)" : "var(--amber-soft)",
+                  color: selectedLecturerTab === "unassigned" ? "#fff" : "var(--amber)",
+                  fontWeight: 600,
+                }}
+                onClick={() => setSelectedLecturerTab("unassigned")}
+              >
+                ⚠️ Chưa phân công ({lecturerSections.unassignedGroups.length})
               </button>
             ) : null}
           </div>
@@ -680,10 +874,10 @@ export function GroupsPage({
         {groupViews.length === 0 ? (
           <EmptyState title="Chưa có nhóm PBL">Tạo nhóm ở phía trên.</EmptyState>
         ) : displayedGroupViews.length === 0 ? (
-          <EmptyState title="Không có nhóm nào thuộc bảng điểm này">
-            Hãy chọn bảng điểm khác hoặc nhấn "Xem tất cả".
+          <EmptyState title="Không tìm thấy nhóm phù hợp">
+            Hãy chọn bảng điểm khác hoặc xóa từ khóa tìm kiếm.
           </EmptyState>
-        ) : (
+        ) : viewLayout === "flat" ? (
           <div className="group-list">
             {displayedGroupViews.map((view) => (
               <GroupCard
@@ -700,8 +894,325 @@ export function GroupsPage({
               />
             ))}
           </div>
+        ) : selectedLecturerTab === "unassigned" ? (
+          <UnassignedGroupPanel
+            groups={lecturerSections.unassignedGroups}
+            context={context}
+            data={data}
+            availableStudents={availableStudents}
+            lecturerById={lecturerById}
+            workbookById={workbookById}
+            onUpdate={commitGroupUpdate}
+            onDataChange={setData}
+            onNotice={onNotice}
+          />
+        ) : selectedLecturerTab !== "all" ? (
+          (() => {
+            const sec = lecturerSections.lecturerSections.find(
+              (s) => s.lecturer.id === selectedLecturerTab,
+            );
+            if (!sec) {
+              return (
+                <EmptyState title="Không tìm thấy giảng viên">
+                  Hãy chọn giảng viên khác.
+                </EmptyState>
+              );
+            }
+            return (
+              <LecturerGroupPanel
+                key={sec.lecturer.id}
+                lecturer={sec.lecturer}
+                groups={sec.groups}
+                studentCount={sec.studentCount}
+                workbooks={sec.workbooks}
+                context={context}
+                data={data}
+                availableStudents={availableStudents}
+                lecturerById={lecturerById}
+                workbookById={workbookById}
+                onUpdate={commitGroupUpdate}
+                onDataChange={setData}
+                onNotice={onNotice}
+              />
+            );
+          })()
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            {lecturerSections.unassignedGroups.length > 0 ? (
+              <UnassignedGroupPanel
+                groups={lecturerSections.unassignedGroups}
+                context={context}
+                data={data}
+                availableStudents={availableStudents}
+                lecturerById={lecturerById}
+                workbookById={workbookById}
+                onUpdate={commitGroupUpdate}
+                onDataChange={setData}
+                onNotice={onNotice}
+              />
+            ) : null}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))",
+                gap: "18px",
+                alignItems: "start",
+              }}
+            >
+              {lecturerSections.lecturerSections.map((sec) => (
+                <LecturerGroupPanel
+                  key={sec.lecturer.id}
+                  lecturer={sec.lecturer}
+                  groups={sec.groups}
+                  studentCount={sec.studentCount}
+                  workbooks={sec.workbooks}
+                  context={context}
+                  data={data}
+                  availableStudents={availableStudents}
+                  lecturerById={lecturerById}
+                  workbookById={workbookById}
+                  onUpdate={commitGroupUpdate}
+                  onDataChange={setData}
+                  onNotice={onNotice}
+                />
+              ))}
+            </div>
+          </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function LecturerGroupPanel({
+  lecturer,
+  groups,
+  studentCount,
+  workbooks,
+  context,
+  data,
+  availableStudents,
+  lecturerById,
+  workbookById,
+  onUpdate,
+  onDataChange,
+  onNotice,
+}: {
+  lecturer: Lecturer;
+  groups: GroupView[];
+  studentCount: number;
+  workbooks: Array<{ label: string; count: number }>;
+  context: BatchContext;
+  data: AppData;
+  availableStudents: BatchContext["students"];
+  lecturerById: Map<string, Lecturer>;
+  workbookById: Map<string, SourceWorkbook>;
+  onUpdate: (result: { data: AppData; error?: string }) => void;
+  onDataChange: (next: AppData) => void;
+  onNotice: (tone: "info" | "success" | "warning" | "danger", text: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "12px",
+        boxShadow: "0 2px 10px rgba(16, 42, 67, 0.04)",
+        display: "flex",
+        flexDirection: "column",
+        height: "640px",
+        overflow: "hidden",
+      }}
+    >
+      {/* Header cố định */}
+      <div
+        style={{
+          padding: "14px 16px",
+          background: "var(--surface-sunken)",
+          borderBottom: "1px solid var(--border-soft)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "8px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <strong style={{ fontSize: "1.05rem", color: "var(--navy)" }}>
+              👨‍🏫 {lecturer.displayName}
+            </strong>
+            {lecturer.room ? (
+              <Badge tone="neutral">📍 {lecturer.room}</Badge>
+            ) : null}
+          </div>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <Badge tone="purple">{groups.length} nhóm</Badge>
+            <Badge tone="info">{studentCount} SV</Badge>
+          </div>
+        </div>
+
+        {/* Cụm bảng điểm */}
+        <div
+          style={{
+            display: "flex",
+            gap: "6px",
+            flexWrap: "wrap",
+            alignItems: "center",
+            fontSize: "0.82rem",
+          }}
+        >
+          <span className="muted" style={{ fontWeight: 500 }}>
+            Bảng điểm chấm:
+          </span>
+          {workbooks.length > 0 ? (
+            workbooks.map((wbInfo, wIdx) => (
+              <Badge key={wIdx} tone="info">
+                {wbInfo.label} ({wbInfo.count} nhóm)
+              </Badge>
+            ))
+          ) : (
+            <span className="muted">— Chưa có nhóm nào —</span>
+          )}
+          {workbooks.length > 2 ? (
+            <Badge tone="warning">⚠️ &gt; 2 bảng điểm</Badge>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Vùng danh sách nhóm có thanh cuộn riêng */}
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          scrollbarWidth: "thin",
+          scrollbarColor: "rgba(16, 42, 67, 0.25) transparent",
+        }}
+      >
+        {groups.length === 0 ? (
+          <EmptyState title="Chưa có nhóm nào">
+            Giảng viên này chưa được phân công chấm nhóm nào.
+          </EmptyState>
+        ) : (
+          groups.map((view) => (
+            <GroupCard
+              key={view.group.id}
+              view={view}
+              context={context}
+              data={data}
+              availableStudents={availableStudents}
+              lecturerById={lecturerById}
+              workbookById={workbookById}
+              onUpdate={onUpdate}
+              onDataChange={onDataChange}
+              onNotice={onNotice}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function UnassignedGroupPanel({
+  groups,
+  context,
+  data,
+  availableStudents,
+  lecturerById,
+  workbookById,
+  onUpdate,
+  onDataChange,
+  onNotice,
+}: {
+  groups: GroupView[];
+  context: BatchContext;
+  data: AppData;
+  availableStudents: BatchContext["students"];
+  lecturerById: Map<string, Lecturer>;
+  workbookById: Map<string, SourceWorkbook>;
+  onUpdate: (result: { data: AppData; error?: string }) => void;
+  onDataChange: (next: AppData) => void;
+  onNotice: (tone: "info" | "success" | "warning" | "danger", text: string) => void;
+}) {
+  const studentCount = groups.reduce((sum, v) => sum + v.studentCount, 0);
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--amber)",
+        borderRadius: "12px",
+        boxShadow: "0 2px 10px rgba(180, 83, 9, 0.08)",
+        display: "flex",
+        flexDirection: "column",
+        height: "640px",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "14px 16px",
+          background: "var(--amber-soft)",
+          borderBottom: "1px solid rgba(180, 83, 9, 0.2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "8px",
+        }}
+      >
+        <div>
+          <strong style={{ fontSize: "1.05rem", color: "var(--amber)" }}>
+            ⚠️ Nhóm chưa phân công chấm
+          </strong>
+          <small className="muted" style={{ display: "block" }}>
+            Cần gán GV chấm hoặc bấm "Gợi ý phân công" ở trên
+          </small>
+        </div>
+        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+          <Badge tone="warning">{groups.length} nhóm</Badge>
+          <Badge tone="neutral">{studentCount} SV</Badge>
+        </div>
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          scrollbarWidth: "thin",
+          scrollbarColor: "rgba(180, 83, 9, 0.3) transparent",
+        }}
+      >
+        {groups.map((view) => (
+          <GroupCard
+            key={view.group.id}
+            view={view}
+            context={context}
+            data={data}
+            availableStudents={availableStudents}
+            lecturerById={lecturerById}
+            workbookById={workbookById}
+            onUpdate={onUpdate}
+            onDataChange={onDataChange}
+            onNotice={onNotice}
+          />
+        ))}
+      </div>
     </div>
   );
 }
