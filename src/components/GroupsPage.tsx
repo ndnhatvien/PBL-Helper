@@ -112,7 +112,11 @@ export function GroupsPage({
                 ),
               )?.sourceWorkbookId;
             const wb = wbId ? workbookById.get(wbId) : null;
-            const label = wb ? getWorkbookLabel(wb) : "Khác";
+            const label = wb
+              ? wb.groupPrefix
+                ? `${wb.groupPrefix} (${getWorkbookLabel(wb)})`
+                : getWorkbookLabel(wb)
+              : "Khác";
             const key = wbId || "unknown";
             const existing = wbMap.get(key);
             if (existing) {
@@ -656,7 +660,7 @@ export function GroupsPage({
                 }).length;
                 return (
                   <option key={w.id} value={w.id}>
-                    {getWorkbookLabel(w)} ({count} nhóm)
+                    {w.groupPrefix ? `${w.groupPrefix} (${getWorkbookLabel(w)})` : getWorkbookLabel(w)} ({count} nhóm)
                   </option>
                 );
               })}
@@ -756,11 +760,16 @@ function GroupCard({
       ),
     )?.sourceWorkbookId;
   const wb = wbId ? workbookById.get(wbId) : null;
-  const wbLabel = wb ? getWorkbookLabel(wb) : "";
+  const wbLabel = wb
+    ? wb.groupPrefix
+      ? `${wb.groupPrefix} (${getWorkbookLabel(wb)})`
+      : getWorkbookLabel(wb)
+    : "";
 
   const formattedTitle =
     view.group.groupCode.toLowerCase().includes("nhóm") ||
-    view.group.groupCode.includes("-")
+    view.group.groupCode.includes("-") ||
+    view.group.groupCode.includes("_")
       ? view.group.groupCode
       : `Nhóm ${view.group.groupCode}`;
 

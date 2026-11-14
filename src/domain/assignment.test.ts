@@ -186,6 +186,11 @@ describe("phân công giảng viên chấm", () => {
     expect(Math.min(...groupCounts)).toBe(18);
     expect(groupCounts.reduce((a, b) => a + b, 0)).toBe(149);
 
+    // Ưu tiên b: Mỗi giảng viên chấm tối thiểu số bảng điểm (chỉ 1 hoặc 2 bảng điểm)
+    for (const w of resultGroups.workload) {
+      expect((w.workbookIds ?? []).length).toBeLessThanOrEqual(2);
+    }
+
     const resultStudents = suggestAssignment(groups149, lecturers, "students");
     expect(resultStudents.unassignedGroupIds).toHaveLength(0);
     const sGroupCounts = resultStudents.workload.map((w) => w.groupCount);

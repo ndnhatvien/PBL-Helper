@@ -160,9 +160,9 @@ export function suggestAssignment(
           chosenCandidateId = tier1[0];
         } else {
           // TIER 2: Chọn GV bắt đầu nhận cụm này:
-          // 2a. Nếu có GV đang nhận dở dang (0 < groupCount < targetGroupsMax), ưu tiên lấp đầy
-          // 2b. Nếu chọn GV mới tinh (groupCount === 0), dùng chiến lược Anti-Starvation (Least Slack):
-          //     Người nào có ít cơ hội chấm ở các bảng điểm còn lại sẽ được ưu tiên nhận trước!
+          // QUY TẮC b: Ưu tiên tối đa số bảng điểm tối thiểu (1 hoặc 2 bảng điểm phụ trách).
+          // Nhóm 1: Các GV chưa nhận bảng điểm nào (clusterCounts.size === 0).
+          //         Gán cho GV này sẽ giúp họ phụ trách trọn vẹn 1 bảng điểm duy nhất!
           const underQuota = eligibleIds.filter((id) => {
             const s = states.get(id)!;
             if (mode === "groups") return s.groupCount < targetGroupsMax;
@@ -171,29 +171,18 @@ export function suggestAssignment(
 
           const candidatesForTier2 = underQuota.length > 0 ? underQuota : eligibleIds;
 
-          const partiallyFilled = candidatesForTier2.filter((id) => {
+          const emptyGraders = candidatesForTier2.filter((id) => {
             const s = states.get(id)!;
-            return s.groupCount > 0 && s.groupCount < targetGroupsMax;
+            return s.clusterCounts.size === 0;
           });
 
-          if (partiallyFilled.length > 0) {
-            partiallyFilled.sort((a, b) => {
-              const sa = states.get(a)!;
-              const sb = states.get(b)!;
-              if (mode === "groups") {
-                if (sb.groupCount !== sa.groupCount) return sb.groupCount - sa.groupCount;
-              } else {
-                if (sb.studentCount !== sa.studentCount) return sb.studentCount - sa.studentCount;
-              }
-              return lecturerIds.indexOf(a) - lecturerIds.indexOf(b);
-            });
-            chosenCandidateId = partiallyFilled[0];
-          } else {
-            // Tính số nhóm ở các cụm còn lại mà mỗi ứng viên có thể nhận (Anti-Starvation)
+          if (emptyGraders.length > 0) {
+            // Dùng chiến lược Anti-Starvation (Least Slack):
+            // Ưu tiên người có ít cơ hội ở các bảng điểm còn lại
             const remainingClusters = clusterList.slice(clusterIdx);
             const futureSlack = new Map<string, number>();
 
-            for (const candId of candidatesForTier2) {
+            for (const candId of emptyGraders) {
               let eligibleFutureGroups = 0;
               for (const rc of remainingClusters) {
                 const hasExclusion = rc.groups.some((g) =>
@@ -208,25 +197,42 @@ export function suggestAssignment(
               futureSlack.set(candId, eligibleFutureGroups - needed);
             }
 
-            candidatesForTier2.sort((a, b) => {
+            emptyGraders.sort((a, b) => {
               const sa = states.get(a)!;
               const sb = states.get(b)!;
-
-              // Ưu tiên người có ít dư địa tương lai nhất (ít slack nhất) để không bị đói
               const slackA = futureSlack.get(a) ?? 0;
               const slackB = futureSlack.get(b) ?? 0;
               if (slackA !== slackB) return slackA - slackB;
-
               if (mode === "groups") {
                 if (sa.groupCount !== sb.groupCount) return sa.groupCount - sb.groupCount;
-                if (sa.studentCount !== sb.studentCount) return sa.studentCount - sb.studentCount;
               } else {
                 if (sa.studentCount !== sb.studentCount) return sa.studentCount - sb.studentCount;
-                if (sa.groupCount !== sb.groupCount) return sa.groupCount - sb.groupCount;
               }
               return lecturerIds.indexOf(a) - lecturerIds.indexOf(b);
             });
-            chosenCandidateId = candidatesForTier2[0];
+            chosenCandidateId = emptyGraders[0];
+          } else {
+            // Nhóm 2: Các GV chỉ mới nhận <= 1 bảng điểm (clusterCounts.size <= 1) và còn chỉ tiêu
+            // Nhận thêm phần dôi dư của bảng điểm này thì họ chỉ có tối đa 2 bảng điểm!
+            const atMost1Cluster = candidatesForTier2.filter((id) => {
+              const s = states.get(id)!;
+              return s.clusterCounts.size <= 1;
+            });
+            const pool = atMost1Cluster.length > 0 ? atMost1Cluster : candidatesForTier2;
+            pool.sort((a, b) => {
+              const sa = states.get(a)!;
+              const sb = states.get(b)!;
+              // Ưu tiên GV có ít bảng điểm hơn
+              if (sa.clusterCounts.size !== sb.clusterCounts.size) {
+                return sa.clusterCounts.size - sb.clusterCounts.size;
+              }
+              // Ưu tiên GV đang có ít nhóm hơn
+              if (sa.groupCount !== sb.groupCount) {
+                return sa.groupCount - sb.groupCount;
+              }
+              return lecturerIds.indexOf(a) - lecturerIds.indexOf(b);
+            });
+            chosenCandidateId = pool[0];
           }
         }
       } else {
@@ -300,9 +306,19 @@ export function suggestAssignment(
 
       for (const g of currState.groups) {
         const excluded = new Set(g.excludedLecturerIds ?? []);
+        const gCid = clusterOf(g);
+
         for (const nextId of lecturerIds) {
           if (nextId === currId || visited.has(nextId)) continue;
           if (excluded.has(nextId)) continue;
+
+          // QUY TẮC b: Tối thiểu bảng điểm phụ trách (ưu tiên tối đa 2 bảng điểm)
+          const nextState = states.get(nextId)!;
+          const hasCid = (nextState.clusterCounts.get(gCid) ?? 0) > 0;
+          if (!hasCid && nextState.clusterCounts.size >= 2) {
+            // Không gán thêm bảng điểm thứ 3
+            continue;
+          }
 
           visited.add(nextId);
           parentEdge.set(nextId, {
@@ -409,6 +425,17 @@ export function suggestAssignment(
               count1_c2_after * count1_c2_after +
               count2_c1_after * count2_c1_after +
               count2_c2_after * count2_c2_after;
+
+            // QUY TẮC b: Không cho phép hoán đổi nếu làm bất kỳ GV nào vượt quá 2 bảng điểm phụ trách!
+            const nextClusters1Size =
+              s1.clusterCounts.size +
+              (count1_c2_before === 0 ? 1 : 0) -
+              (count1_c1_after === 0 ? 1 : 0);
+            const nextClusters2Size =
+              s2.clusterCounts.size +
+              (count2_c1_before === 0 ? 1 : 0) -
+              (count2_c2_after === 0 ? 1 : 0);
+            if (nextClusters1Size > 2 || nextClusters2Size > 2) continue;
 
             // Nếu hoán đổi làm tăng độ tập trung bảng điểm rõ rệt
             if (scoreAfter > scoreBefore) {

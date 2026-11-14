@@ -3,4 +3,5 @@ dist
 .superpowers
 *.local
 .vercel
+bun.lock
 

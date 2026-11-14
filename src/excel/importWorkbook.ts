@@ -8,7 +8,12 @@ import type {
 } from "../types";
 import { arrayBufferToBase64, base64ToArrayBuffer } from "../utils/base64";
 import { createId } from "../utils/id";
-import { cellText, isBlankRow, normalizeText } from "../utils/text";
+import {
+  cellText,
+  generateScorecardPrefix,
+  isBlankRow,
+  normalizeText,
+} from "../utils/text";
 
 export interface HeaderDetection {
   headerRow: number;
@@ -907,6 +912,9 @@ export function analyzeWorkbook(options: AnalyzeOptions): AnalyzeResult {
     metaCourseName,
     metaLecturerName,
     metaLecturerNames,
+    groupPrefix:
+      generateScorecardPrefix(metaLecturerNames) ||
+      (metaCourseCode ? `L_${metaCourseCode}` : undefined),
     sourceTemplate,
     errors: parsed.errors,
     warnings: parsed.warnings,
@@ -1038,6 +1046,7 @@ export function mergeDuplicatePendingWorkbooks(
           workbook.metaLecturerNames.length > 0
         ) {
           targetWb.metaLecturerNames = [...workbook.metaLecturerNames];
+          targetWb.groupPrefix = generateScorecardPrefix(targetWb.metaLecturerNames);
         }
       }
     }

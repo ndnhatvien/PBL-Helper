@@ -6,7 +6,9 @@ import {
   deleteSourceWorkbook,
   splitLecturerNames,
   updateSourceWorkbookAdvisors,
+  updateSourceWorkbookPrefix,
 } from "../store/actions";
+import { generateScorecardPrefix } from "../utils/text";
 import {
   analyzeFile,
   analyzeWorkbook,
@@ -66,6 +68,7 @@ export function ImportPage({
   const [localError, setLocalError] = useState<string | null>(null);
   const [editingWorkbook, setEditingWorkbook] = useState<SourceWorkbook | null>(null);
   const [editingAdvisors, setEditingAdvisors] = useState<string[]>([""]);
+  const [editingPrefix, setEditingPrefix] = useState<string>("");
 
   const existingStudents = useMemo(
     () => data.students.filter((student) => student.batchId === batch?.id),
@@ -251,13 +254,29 @@ export function ImportPage({
   ) {
     const validAdvisors = nextAdvisors.map((n) => n.trim()).filter(Boolean);
     const combinedName = validAdvisors.join(", ") || null;
+    const autoPrefix = generateScorecardPrefix(validAdvisors);
+    setPending((previous) =>
+      previous.map((item) => {
+        if (item.tempId !== workbook.tempId) return item;
+        const prevAuto = generateScorecardPrefix(item.metaLecturerNames);
+        const shouldUpdatePrefix = !item.groupPrefix || item.groupPrefix === prevAuto;
+        return {
+          ...item,
+          metaLecturerNames: nextAdvisors,
+          metaLecturerName: combinedName,
+          groupPrefix: shouldUpdatePrefix && autoPrefix ? autoPrefix : item.groupPrefix,
+        };
+      }),
+    );
+  }
+
+  function handleUpdatePrefix(workbook: PendingWorkbook, nextPrefix: string) {
     setPending((previous) =>
       previous.map((item) =>
         item.tempId === workbook.tempId
           ? {
               ...item,
-              metaLecturerNames: nextAdvisors,
-              metaLecturerName: combinedName,
+              groupPrefix: nextPrefix,
             }
           : item,
       ),
@@ -286,25 +305,47 @@ export function ImportPage({
       ? [...wb.metaLecturerNames]
       : wb.metaLecturerName
         ? splitLecturerNames(wb.metaLecturerName)
-        : [""];
+        : [];
     setEditingWorkbook(wb);
     setEditingAdvisors(list.length > 0 ? list : [""]);
+    setEditingPrefix(wb.groupPrefix || generateScorecardPrefix(list) || "");
   }
 
   function handleSaveWorkbookAdvisors() {
     if (!editingWorkbook || !batch) return;
-    const result = updateSourceWorkbookAdvisors(
-      data,
+    let nextData = data;
+    const resultAdv = updateSourceWorkbookAdvisors(
+      nextData,
       batch.id,
       editingWorkbook.id,
       editingAdvisors,
     );
-    if (result.error) {
-      onNotice("danger", result.error);
+    if (resultAdv.error) {
+      onNotice("danger", resultAdv.error);
       return;
     }
-    setData(result.data);
-    onNotice("success", `Đã cập nhật GVHD cho file "${editingWorkbook.fileName}".`);
+    nextData = resultAdv.data;
+
+    const trimmedPrefix = editingPrefix.trim();
+    if (trimmedPrefix !== (editingWorkbook.groupPrefix || "")) {
+      const resultPrefix = updateSourceWorkbookPrefix(
+        nextData,
+        batch.id,
+        editingWorkbook.id,
+        trimmedPrefix,
+      );
+      if (resultPrefix.error) {
+        onNotice("danger", resultPrefix.error);
+        return;
+      }
+      nextData = resultPrefix.data;
+    }
+
+    setData(nextData);
+    onNotice(
+      "success",
+      `Đã cập nhật GVHD và tiền tố nhóm (${trimmedPrefix || "mặc định"}) cho file "${editingWorkbook.fileName}".`,
+    );
     setEditingWorkbook(null);
   }
 
@@ -477,6 +518,9 @@ export function ImportPage({
                 onUpdateLecturers={(nextAdvisors) =>
                   handleUpdateLecturers(workbook, nextAdvisors)
                 }
+                onUpdatePrefix={(nextPrefix) =>
+                  handleUpdatePrefix(workbook, nextPrefix)
+                }
                 onRemove={() =>
                   setPending((previous) =>
                     previous.filter((item) => item.tempId !== workbook.tempId),
@@ -566,6 +610,7 @@ export function ImportPage({
                   <tr>
                     <th>File</th>
                     <th>Mẫu / Học phần</th>
+                    <th>Tiền tố nhóm (map tên)</th>
                     <th>Giảng viên hướng dẫn (GVHD)</th>
                     <th>Sheet</th>
                     <th>Sinh viên</th>
@@ -595,6 +640,23 @@ export function ImportPage({
                             <Badge tone="neutral">Tùy chỉnh</Badge>
                           )}{" "}
                           <small className="muted">{workbook.metaCourseCode || ""}</small>
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Badge tone="purple">{workbook.groupPrefix || "—"}</Badge>
+                            <button
+                              type="button"
+                              className="button small ghost"
+                              style={{ padding: "2px 6px", fontSize: "0.8rem" }}
+                              title="Sửa tiền tố nhóm và tự động cập nhật lại toàn bộ mã nhóm"
+                              onClick={() => startEditWorkbook(workbook)}
+                            >
+                              ✏️
+                            </button>
+                          </div>
+                          <small className="muted" style={{ display: "block" }}>
+                            {workbook.groupPrefix ? `Mẫu: ${workbook.groupPrefix}_N01` : ""}
+                          </small>
                         </td>
                         <td>
                           <div>
@@ -631,10 +693,10 @@ export function ImportPage({
                             <button
                               type="button"
                               className="button small secondary"
-                              title="Sửa GVHD của file nếu nhập sai hoặc thiếu GVHD đồng hướng dẫn"
+                              title="Sửa GVHD hoặc tiền tố nhóm của file"
                               onClick={() => startEditWorkbook(workbook)}
                             >
-                              ✏️ Sửa GVHD
+                              ✏️ Sửa GVHD / Tiền tố
                             </button>
                             <button
                               type="button"
@@ -797,6 +859,53 @@ export function ImportPage({
                   </button>
                 </div>
               ) : null}
+
+              <div
+                style={{
+                  marginTop: "8px",
+                  padding: "12px",
+                  background: "var(--surface-sunken)",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-soft)",
+                }}
+              >
+                <label className="field" style={{ margin: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "4px",
+                    }}
+                  >
+                    <span><strong>🏷️ Tiền tố nhóm (map tên nhóm)</strong></span>
+                    <button
+                      type="button"
+                      className="button small ghost"
+                      style={{ fontSize: "0.8rem", padding: "2px 8px" }}
+                      onClick={() => {
+                        const auto = generateScorecardPrefix(editingAdvisors);
+                        if (auto) setEditingPrefix(auto);
+                      }}
+                    >
+                      ⚡ Lấy theo GVHD: {generateScorecardPrefix(editingAdvisors) || "—"}
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={editingPrefix}
+                    placeholder="Ví dụ: T.Thang, T.Thanh_T.Tung, T.TuanN"
+                    onChange={(e) => setEditingPrefix(e.target.value)}
+                  />
+                  <small className="muted" style={{ display: "block", marginTop: "4px" }}>
+                    Tất cả các nhóm thuộc bảng điểm này sẽ được tự động đổi tên theo định dạng:{" "}
+                    <strong style={{ color: "var(--teal)" }}>
+                      {editingPrefix.trim() ? `${editingPrefix.trim()}_N01` : "N01"}
+                    </strong>
+                    , giúp phân biệt rõ nhóm giữa các bảng điểm khi phân công chấm.
+                  </small>
+                </label>
+              </div>
             </div>
 
             <div
@@ -840,6 +949,7 @@ function PendingWorkbookCard({
   onReanalyze,
   onMappingChange,
   onUpdateLecturers,
+  onUpdatePrefix,
   onRemove,
 }: {
   workbook: PendingWorkbook;
@@ -851,6 +961,7 @@ function PendingWorkbookCard({
   }) => void;
   onMappingChange: (key: keyof ColumnMapping, rawValue: string) => void;
   onUpdateLecturers: (nextAdvisors: string[]) => void;
+  onUpdatePrefix: (nextPrefix: string) => void;
   onRemove: () => void;
 }) {
   const [rowFilter, setRowFilter] = useState<
@@ -1072,6 +1183,35 @@ function PendingWorkbookCard({
               </div>
             </label>
           ))}
+        </div>
+
+        <div
+          style={{
+            marginTop: "10px",
+            padding: "8px 12px",
+            background: "rgba(15, 118, 110, 0.08)",
+            borderRadius: "6px",
+            border: "1px dashed rgba(15, 118, 110, 0.3)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "8px",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1, minWidth: "260px" }}>
+            <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>🏷️ Tiền tố nhóm:</span>
+            <input
+              type="text"
+              value={workbook.groupPrefix ?? ""}
+              placeholder="VD: T.Thang, T.Thanh_T.Tung"
+              style={{ maxWidth: "220px", padding: "4px 8px", fontSize: "0.88rem" }}
+              onChange={(e) => onUpdatePrefix(e.target.value)}
+            />
+          </div>
+          <small className="muted" style={{ fontSize: "0.82rem" }}>
+            Mã nhóm sẽ tạo: <strong>{workbook.groupPrefix ? `${workbook.groupPrefix}_N01` : "N01"}</strong> (tránh trùng tên giữa các bảng điểm)
+          </small>
         </div>
       </div>
 

@@ -55,6 +55,7 @@ export interface SourceWorkbook {
   metaCourseName: string | null;
   metaLecturerName?: string | null;
   metaLecturerNames?: string[];
+  groupPrefix?: string;
   sourceTemplate?: "bang_diem" | "dsts" | "custom";
 }
 
@@ -217,6 +218,7 @@ export interface PendingWorkbook {
   metaCourseName: string | null;
   metaLecturerName?: string | null;
   metaLecturerNames?: string[];
+  groupPrefix?: string;
   sourceTemplate?: "bang_diem" | "dsts" | "custom";
   errors: string[];
   warnings: string[];

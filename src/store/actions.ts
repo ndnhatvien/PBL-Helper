@@ -20,6 +20,11 @@ import {
 } from "../excel/importWorkbook";
 export { splitLecturerNames };
 import { createId, nowIso } from "../utils/id";
+import {
+  formatAdvisorGroupCode,
+  generateScorecardPrefix,
+  normalizeRawGroupCode,
+} from "../utils/text";
 
 export interface ActionResult {
   data: AppData;
@@ -491,6 +496,10 @@ export function commitSourceWorkbooks(
       metaCourseName: pending.metaCourseName,
       metaLecturerName: primaryLecturerName,
       metaLecturerNames: workbookLecturerNames,
+      groupPrefix:
+        pending.groupPrefix?.trim() ||
+        generateScorecardPrefix(workbookLecturerNames) ||
+        (pending.metaCourseCode ? `L_${pending.metaCourseCode}` : ""),
       sourceTemplate: pending.sourceTemplate ?? "custom",
     };
     newWorkbooks.push(workbook);
@@ -571,21 +580,65 @@ export function getWorkbookLabel(wb?: SourceWorkbook | null): string {
   );
 }
 
+export function getScorecardGroupPrefix(wb?: SourceWorkbook | null): string {
+  if (!wb) return "";
+  if (wb.groupPrefix?.trim()) return wb.groupPrefix.trim();
+  const advNames = wb.metaLecturerNames?.length
+    ? wb.metaLecturerNames
+    : wb.metaLecturerName
+      ? splitLecturerNames(wb.metaLecturerName)
+      : [];
+  const advPrefix = generateScorecardPrefix(advNames);
+  if (advPrefix) return advPrefix;
+  return getWorkbookLabel(wb);
+}
+
 export function formatCompoundGroupCode(
   wb: SourceWorkbook | undefined,
   rawCode: string,
 ): string {
-  const cleanRaw = rawCode.trim();
-  if (!cleanRaw) return "";
-  const isPlainNumber = /^\d+$/.test(cleanRaw);
-  const groupLabel = isPlainNumber ? `Nhóm ${cleanRaw}` : cleanRaw;
+  const prefix = getScorecardGroupPrefix(wb);
+  return formatAdvisorGroupCode(prefix, rawCode);
+}
 
-  const prefix = wb ? getWorkbookLabel(wb) : "";
-  if (!prefix) return groupLabel;
-  if (groupLabel.toLowerCase().startsWith(prefix.toLowerCase())) {
-    return groupLabel;
-  }
-  return `${prefix} - ${groupLabel}`;
+export function updateSourceWorkbookPrefix(
+  data: AppData,
+  batchId: string,
+  workbookId: string,
+  newPrefix: string,
+): ActionResult {
+  const wb = data.sourceWorkbooks.find(
+    (w) => w.id === workbookId && w.batchId === batchId,
+  );
+  if (!wb) return { data, error: "Không tìm thấy file nguồn." };
+
+  const cleanPrefix = newPrefix.trim();
+  const updatedWorkbooks = data.sourceWorkbooks.map((w) =>
+    w.id === workbookId ? { ...w, groupPrefix: cleanPrefix } : w,
+  );
+
+  // Đồng bộ cập nhật lại mã nhóm cho các nhóm thuộc bảng điểm này
+  const updatedGroups = data.groups.map((group) => {
+    if (group.batchId !== batchId) return group;
+    if (group.sourceWorkbookId !== workbookId) return group;
+    const subCode = group.groupCode.includes("_")
+      ? group.groupCode.split("_").slice(1).join("_")
+      : group.groupCode.includes("-")
+        ? group.groupCode.split("-").slice(1).join("-").trim()
+        : group.groupCode;
+    const nextCode = cleanPrefix
+      ? `${cleanPrefix}_${normalizeRawGroupCode(subCode)}`
+      : normalizeRawGroupCode(subCode);
+    return { ...group, groupCode: nextCode, updatedAt: nowIso() };
+  });
+
+  return {
+    data: {
+      ...data,
+      sourceWorkbooks: updatedWorkbooks,
+      groups: updatedGroups,
+    },
+  };
 }
 
 export function createGroup(

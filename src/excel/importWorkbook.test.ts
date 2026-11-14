@@ -19,6 +19,7 @@ import {
   renameLecturer,
   resetAndRecreateGroupsFromSource,
   updateSourceWorkbookAdvisors,
+  updateSourceWorkbookPrefix,
 } from "../store/actions";
 import { createEmptyData } from "../store/store";
 import { buildScenario } from "../test/scenario";
@@ -597,14 +598,23 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
     const batchGroups = data.groups.filter((g) => g.batchId === batch.id);
     expect(batchGroups).toHaveLength(6);
 
-    // Kiểm tra tên nhóm được gắn tiền tố mã học phần rõ ràng
+    // Kiểm tra tên nhóm được gắn tiền tố GVHD theo chuẩn mới (T.A_N01, T.B_N01,...)
     const groupCodes = batchGroups.map((g) => g.groupCode).sort();
-    expect(groupCodes).toContain("21.11 - Nhóm 1");
-    expect(groupCodes).toContain("21.11 - Nhóm 2");
-    expect(groupCodes).toContain("21.12 - Nhóm 1");
-    expect(groupCodes).toContain("21.12 - Nhóm 2");
-    expect(groupCodes).toContain("21.13 - Nhóm 1");
-    expect(groupCodes).toContain("21.13 - Nhóm 2");
+    expect(groupCodes).toContain("T.A_N01");
+    expect(groupCodes).toContain("T.A_N02");
+    expect(groupCodes).toContain("T.B_N01");
+    expect(groupCodes).toContain("T.B_N02");
+    expect(groupCodes).toContain("T.C_N01");
+    expect(groupCodes).toContain("T.C_N02");
+
+    // Kiểm tra đổi tiền tố nhóm cho bảng điểm (updateSourceWorkbookPrefix)
+    const wb1Id = data.sourceWorkbooks.find((w) => w.fileName === "LHP_21.11.xlsx")!.id;
+    const updatePrefixRes = updateSourceWorkbookPrefix(data, batch.id, wb1Id, "T.Thanh_T.Tung");
+    expect(updatePrefixRes.error).toBeUndefined();
+    data = updatePrefixRes.data;
+    const updatedCodes = data.groups.filter((g) => g.batchId === batch.id).map((g) => g.groupCode).sort();
+    expect(updatedCodes).toContain("T.Thanh_T.Tung_N01");
+    expect(updatedCodes).toContain("T.Thanh_T.Tung_N02");
 
     // Kiểm tra tính năng reset và làm mới lại nhóm
     const resetRes = resetAndRecreateGroupsFromSource(data, batch.id);
