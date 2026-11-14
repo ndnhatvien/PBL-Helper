@@ -134,18 +134,23 @@ export function commitSourceWorkbooks(
   const warnings: string[] = [];
 
   for (const pending of pendingWorkbooks) {
-    const rawNames = pending.metaLecturerNames?.length
-      ? pending.metaLecturerNames
-      : pending.metaLecturerName
-        ? splitLecturerNames(pending.metaLecturerName)
-        : [];
+    const rawNames = (
+      pending.metaLecturerNames?.length
+        ? pending.metaLecturerNames
+        : pending.metaLecturerName
+          ? splitLecturerNames(pending.metaLecturerName)
+          : []
+    )
+      .map((n) => n.trim())
+      .filter(Boolean);
 
     for (const row of pending.rows) {
       if (row.advisorName) {
         const splitRowAdv = splitLecturerNames(row.advisorName);
         for (const name of splitRowAdv) {
-          if (!rawNames.includes(name)) {
-            rawNames.push(name);
+          const cleanName = name.trim();
+          if (cleanName && !rawNames.includes(cleanName)) {
+            rawNames.push(cleanName);
           }
         }
       }
@@ -166,16 +171,20 @@ export function commitSourceWorkbooks(
       }
     }
 
+    const workbookLecturerNames = (
+      pending.metaLecturerNames?.length
+        ? pending.metaLecturerNames
+        : pending.metaLecturerName
+          ? splitLecturerNames(pending.metaLecturerName)
+          : []
+    )
+      .map((n) => n.trim())
+      .filter(Boolean);
+
     const primaryLecturerName =
+      workbookLecturerNames.join(", ") ||
       pending.metaLecturerName?.trim() ||
-      (pending.metaLecturerNames && pending.metaLecturerNames.length > 0
-        ? pending.metaLecturerNames.join(", ")
-        : null);
-    const workbookLecturerNames = pending.metaLecturerNames?.length
-      ? pending.metaLecturerNames
-      : primaryLecturerName
-        ? splitLecturerNames(primaryLecturerName)
-        : [];
+      null;
 
     const workbook: SourceWorkbook = {
       id: createId("wb"),
@@ -480,11 +489,15 @@ export function autoCreateGroupsFromSource(
         }
 
         const wb = workbookMap.get(student.sourceWorkbookId);
-        const wbNames = wb?.metaLecturerNames?.length
-          ? wb.metaLecturerNames
-          : wb?.metaLecturerName
-            ? splitLecturerNames(wb.metaLecturerName)
-            : [];
+        const wbNames = (
+          wb?.metaLecturerNames?.length
+            ? wb.metaLecturerNames
+            : wb?.metaLecturerName
+              ? splitLecturerNames(wb.metaLecturerName)
+              : []
+        )
+          .map((n) => n.trim())
+          .filter(Boolean);
         for (const wbName of wbNames) {
           const lec = nextData.lecturers.find(
             (l) =>

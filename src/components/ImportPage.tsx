@@ -171,6 +171,25 @@ export function ImportPage({
     reanalyze(workbook, { mapping: nextMapping });
   }
 
+  function handleUpdateLecturers(
+    workbook: PendingWorkbook,
+    nextAdvisors: string[],
+  ) {
+    const validAdvisors = nextAdvisors.map((n) => n.trim()).filter(Boolean);
+    const combinedName = validAdvisors.join(", ") || null;
+    setPending((previous) =>
+      previous.map((item) =>
+        item.tempId === workbook.tempId
+          ? {
+              ...item,
+              metaLecturerNames: nextAdvisors,
+              metaLecturerName: combinedName,
+            }
+          : item,
+      ),
+    );
+  }
+
   function handleImport() {
     if (!batch) return;
     const result = commitSourceWorkbooks(data, batch.id, pending);
@@ -307,6 +326,9 @@ export function ImportPage({
                 onMappingChange={(key, rawValue) =>
                   handleMappingChange(workbook, key, rawValue)
                 }
+                onUpdateLecturers={(nextAdvisors) =>
+                  handleUpdateLecturers(workbook, nextAdvisors)
+                }
                 onRemove={() =>
                   setPending((previous) =>
                     previous.filter((item) => item.tempId !== workbook.tempId),
@@ -399,6 +421,7 @@ function PendingWorkbookCard({
   workbook,
   onReanalyze,
   onMappingChange,
+  onUpdateLecturers,
   onRemove,
 }: {
   workbook: PendingWorkbook;
@@ -409,6 +432,7 @@ function PendingWorkbookCard({
     metaLecturerNames?: string[];
   }) => void;
   onMappingChange: (key: keyof ColumnMapping, rawValue: string) => void;
+  onUpdateLecturers: (nextAdvisors: string[]) => void;
   onRemove: () => void;
 }) {
   const [rowFilter, setRowFilter] = useState<
@@ -417,7 +441,7 @@ function PendingWorkbookCard({
   const [showAllRows, setShowAllRows] = useState(false);
 
   const currentAdvisors = useMemo(() => {
-    if (workbook.metaLecturerNames && workbook.metaLecturerNames.length > 0) {
+    if (workbook.metaLecturerNames !== undefined && workbook.metaLecturerNames.length > 0) {
       return workbook.metaLecturerNames;
     }
     if (workbook.metaLecturerName) {
@@ -430,28 +454,21 @@ function PendingWorkbookCard({
     const next = [...currentAdvisors];
     while (next.length <= index) next.push("");
     next[index] = value;
-    const cleaned = next.filter((n, i) => n.trim() || i === 0);
-    onReanalyze({
-      metaLecturerNames: cleaned.map((n) => n.trim()).filter(Boolean),
-      metaLecturerName: cleaned.filter(Boolean).join(", "),
-    });
+    onUpdateLecturers(next);
   }
 
   function handleAddCoAdvisor() {
-    const next = [...currentAdvisors, ""];
-    onReanalyze({
-      metaLecturerNames: next.map((n) => n.trim()).filter(Boolean),
-      metaLecturerName: next.filter(Boolean).join(", "),
-    });
+    const next = [...currentAdvisors];
+    while (next.length < 1) next.push("");
+    if (next.length < 2) {
+      next.push("");
+    }
+    onUpdateLecturers(next);
   }
 
   function handleRemoveAdvisor(index: number) {
     const next = currentAdvisors.filter((_, i) => i !== index);
-    const cleaned = next.length > 0 ? next : [""];
-    onReanalyze({
-      metaLecturerNames: cleaned.map((n) => n.trim()).filter(Boolean),
-      metaLecturerName: cleaned.filter(Boolean).join(", "),
-    });
+    onUpdateLecturers(next.length > 0 ? next : [""]);
   }
 
   const errorRows = useMemo(
@@ -851,7 +868,7 @@ function PendingWorkbookCard({
                 const rowAdvisor =
                   row.advisorName ||
                   (workbook.metaLecturerNames?.length
-                    ? workbook.metaLecturerNames.join(", ")
+                    ? workbook.metaLecturerNames.filter(Boolean).join(", ")
                     : workbook.metaLecturerName || "");
 
                 return (

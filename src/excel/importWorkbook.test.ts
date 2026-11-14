@@ -14,6 +14,7 @@ import { addBatch, autoCreateGroupsFromSource, commitSourceWorkbooks } from "../
 import { createEmptyData } from "../store/store";
 import { buildScenario } from "../test/scenario";
 import { arrayBufferToBase64 } from "../utils/base64";
+import type { PendingWorkbook } from "../types";
 import {
   makeSourceWorkbook,
   makeTestBatch,
@@ -257,6 +258,7 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
         courseCode: null,
         courseName: null,
         groupCode: null,
+        advisor: null,
         score: null,
       },
       null,
@@ -283,6 +285,7 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
         courseCode: null,
         courseName: null,
         groupCode: null,
+        advisor: null,
         score: null,
       },
       null,
@@ -308,6 +311,7 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
         courseCode: null,
         courseName: null,
         groupCode: null,
+        advisor: null,
         score: null,
       },
       null,
@@ -334,6 +338,7 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
         courseCode: null,
         courseName: null,
         groupCode: 3,
+        advisor: null,
         score: null,
       },
       null,
@@ -399,5 +404,62 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
 
     const parsed = parseRowsWithMapping(matrix, headerRow, mapping, "HP01", "Học phần 1");
     expect(parsed.rows[0].advisorName).toBe("TS. Trần Văn B");
+  });
+
+  it("nhập file với GVHD đồng hướng dẫn và lọc bỏ chuỗi rỗng", () => {
+    const scenario = buildScenario();
+    const pendingWb: PendingWorkbook = {
+      tempId: "pending_coadvisor",
+      fileName: "test_coadvisor.xlsx",
+      fileSize: 1024,
+      originalBase64: "",
+      sheetNames: ["Sheet1"],
+      sheetName: "Sheet1",
+      headerRow: 0,
+      dataStartRow: 1,
+      headers: ["MSSV", "Họ tên"],
+      mapping: {
+        mssv: 0,
+        name: 1,
+        className: null,
+        courseCode: null,
+        courseName: null,
+        groupCode: null,
+        advisor: null,
+        score: null,
+      },
+      rows: [
+        {
+          sourceRowNumber: 1,
+          mssv: "2011001",
+          name: "Sinh viên Đồng hướng dẫn",
+          className: "20DT1",
+          courseCode: "",
+          courseName: "",
+          groupCode: "",
+          originalRowData: [],
+          errors: [],
+          warnings: [],
+        },
+      ],
+      metaCourseCode: null,
+      metaCourseName: null,
+      metaLecturerName: "ThS. Nguyễn Văn A",
+      metaLecturerNames: ["ThS. Nguyễn Văn A", "TS. Lê Thị B", ""],
+      errors: [],
+      warnings: [],
+    };
+
+    const res = commitSourceWorkbooks(scenario.data, scenario.batch.id, [pendingWb]);
+    expect(res.error).toBeUndefined();
+    const wb = res.data.sourceWorkbooks.find((w) => w.fileName === "test_coadvisor.xlsx");
+    expect(wb).toBeDefined();
+    expect(wb?.metaLecturerNames).toEqual(["ThS. Nguyễn Văn A", "TS. Lê Thị B"]);
+    expect(wb?.metaLecturerName).toBe("ThS. Nguyễn Văn A, TS. Lê Thị B");
+
+    const lecturerNames = res.data.lecturers.map((l) => l.displayName);
+    expect(lecturerNames).toContain("ThS. Nguyễn Văn A");
+    expect(lecturerNames).toContain("TS. Lê Thị B");
+    expect(lecturerNames).not.toContain("");
   });
 });

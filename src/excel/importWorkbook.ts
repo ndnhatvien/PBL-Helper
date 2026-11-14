@@ -1032,6 +1032,13 @@ export function mergeDuplicatePendingWorkbooks(
         if (!targetWb.metaLecturerName && workbook.metaLecturerName) {
           targetWb.metaLecturerName = workbook.metaLecturerName;
         }
+        if (
+          (!targetWb.metaLecturerNames || targetWb.metaLecturerNames.length === 0) &&
+          workbook.metaLecturerNames &&
+          workbook.metaLecturerNames.length > 0
+        ) {
+          targetWb.metaLecturerNames = [...workbook.metaLecturerNames];
+        }
       }
     }
     workbook.rows = keptRows;
