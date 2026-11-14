@@ -197,4 +197,31 @@ describe("phân công giảng viên chấm", () => {
     // Chế độ sinh viên vẫn giữ số nhóm cân bằng chặt chẽ
     expect(Math.max(...sGroupCounts) - Math.min(...sGroupCounts)).toBeLessThanOrEqual(3);
   });
+
+  it("bỏ qua các nhóm cấm thi (xxx, XXX, _xxx) và không phân công chấm thi", () => {
+    const mixedGroups: AssignmentGroupInput[] = [
+      { id: "g1", groupCode: "T.Nam_41_N01", studentCount: 3, excludedLecturerIds: ["L1"] },
+      { id: "g2", groupCode: "T.Nam_41_N02", studentCount: 3, excludedLecturerIds: ["L1"] },
+      { id: "g3", groupCode: "T.Nam_41_XXX", studentCount: 1, excludedLecturerIds: ["L1"] }, // Cấm thi
+      { id: "g4", groupCode: "xxx", studentCount: 2, excludedLecturerIds: ["L2"] }, // Cấm thi
+      { id: "g5", groupCode: "T.Tung_40_N01", studentCount: 3, excludedLecturerIds: ["L2"] },
+    ];
+    const lecturers = ["L1", "L2", "L3"];
+
+    const result = suggestAssignment(mixedGroups, lecturers, "groups");
+
+    // Các nhóm cấm thi không được phân cho bất kỳ GV nào
+    expect(result.assignments["g3"]).toBeUndefined();
+    expect(result.assignments["g4"]).toBeUndefined();
+
+    // Các nhóm cấm thi cũng không bị coi là lỗi chưa phân công
+    expect(result.unassignedGroupIds).not.toContain("g3");
+    expect(result.unassignedGroupIds).not.toContain("g4");
+
+    // Chỉ có 3 nhóm hợp lệ được phân công
+    expect(result.assignments["g1"]).toBeDefined();
+    expect(result.assignments["g2"]).toBeDefined();
+    expect(result.assignments["g5"]).toBeDefined();
+    expect(Object.keys(result.assignments)).toHaveLength(3);
+  });
 });

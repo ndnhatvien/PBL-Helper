@@ -103,6 +103,9 @@ export function generateScorecardPrefix(
 export function normalizeRawGroupCode(rawCode: string): string {
   const clean = rawCode.trim();
   if (!clean) return "";
+  if (clean.toLowerCase() === "xxx") {
+    return "XXX";
+  }
   if (/^\d+$/.test(clean)) {
     const num = parseInt(clean, 10);
     return `N${num < 10 ? "0" + num : num}`;
@@ -113,6 +116,22 @@ export function normalizeRawGroupCode(rawCode: string): string {
     return `N${num < 10 ? "0" + num : num}`;
   }
   return clean;
+}
+
+/**
+ * Kiểm tra mã nhóm có phải ký hiệu cấm thi (xxx) không.
+ * Các nhóm cấm thi sẽ không được phân công chấm thi.
+ * Ví dụ: "xxx", "XXX", "T.Nam_41_XXX", "Nhóm xxx", "41_xxx" -> true
+ */
+export function isBarredGroupCode(code?: string | null): boolean {
+  if (!code) return false;
+  const clean = code.trim().toLowerCase();
+  return (
+    clean === "xxx" ||
+    clean.endsWith("_xxx") ||
+    clean.endsWith("-xxx") ||
+    /(?:^|[_-\s])xxx(?:[_-\s]|$)/i.test(clean)
+  );
 }
 
 /**

@@ -1,3 +1,5 @@
+import { isBarredGroupCode } from "../utils/text";
+
 export interface AssignmentGroupInput {
   id: string;
   groupCode: string;
@@ -47,11 +49,27 @@ export function suggestAssignment(
   lecturerIds: string[],
   mode: BalanceMode = "groups",
 ): AssignmentResult {
+  // Loại trừ các nhóm cấm thi (ký hiệu xxx) khỏi phân công chấm thi
+  const eligibleGroups = groups.filter((g) => !isBarredGroupCode(g.groupCode));
+
   if (lecturerIds.length === 0) {
     return {
       assignments: {},
       workload: [],
-      unassignedGroupIds: groups.map((g) => g.id),
+      unassignedGroupIds: eligibleGroups.map((g) => g.id),
+    };
+  }
+
+  if (eligibleGroups.length === 0) {
+    return {
+      assignments: {},
+      workload: lecturerIds.map((id) => ({
+        lecturerId: id,
+        groupCount: 0,
+        studentCount: 0,
+        workbookIds: [],
+      })),
+      unassignedGroupIds: [],
     };
   }
 
@@ -71,7 +89,7 @@ export function suggestAssignment(
 
   // Gom nhóm theo cluster (bảng điểm)
   const clusterGroups = new Map<string, AssignmentGroupInput[]>();
-  for (const group of groups) {
+  for (const group of eligibleGroups) {
     const cid = clusterOf(group);
     const list = clusterGroups.get(cid) ?? [];
     list.push(group);
@@ -102,11 +120,11 @@ export function suggestAssignment(
     return a.clusterId.localeCompare(b.clusterId);
   });
 
-  const totalGroupsCount = groups.length;
+  const totalGroupsCount = eligibleGroups.length;
   const numLecturers = lecturerIds.length;
   const targetGroupsMax = Math.ceil(totalGroupsCount / numLecturers);
   const targetStudents =
-    groups.reduce((acc, g) => acc + g.studentCount, 0) / numLecturers;
+    eligibleGroups.reduce((acc, g) => acc + g.studentCount, 0) / numLecturers;
 
   const assignments: Record<string, string> = {};
   const unassignedGroupIds: string[] = [];

@@ -28,6 +28,7 @@ import {
   PageHeader,
 } from "./shared";
 import { LecturersPanel } from "./LecturersPanel";
+import { isBarredGroupCode } from "../utils/text";
 
 interface GroupsPageProps {
   data: AppData;
@@ -148,13 +149,18 @@ export function GroupsPage({
       };
     });
 
+    const barredGroups = displayedGroupViews.filter((view) =>
+      isBarredGroupCode(view.group.groupCode),
+    );
+
     const unassignedGroups = displayedGroupViews.filter(
-      (view) => !view.group.graderId,
+      (view) => !view.group.graderId && !isBarredGroupCode(view.group.groupCode),
     );
 
     return {
       lecturerSections: sections,
       unassignedGroups,
+      barredGroups,
     };
   }, [activeLecturers, displayedGroupViews, context.students, context.members, workbookById]);
 
@@ -868,6 +874,23 @@ export function GroupsPage({
                 ⚠️ Chưa phân công ({lecturerSections.unassignedGroups.length})
               </button>
             ) : null}
+            {lecturerSections.barredGroups.length > 0 ? (
+              <button
+                type="button"
+                className={`button small ${selectedLecturerTab === "barred" ? "" : "ghost"}`}
+                style={{
+                  borderRadius: "16px",
+                  padding: "3px 10px",
+                  fontSize: "0.82rem",
+                  background: selectedLecturerTab === "barred" ? "var(--red)" : "rgba(224, 49, 49, 0.1)",
+                  color: selectedLecturerTab === "barred" ? "#fff" : "var(--red)",
+                  fontWeight: 600,
+                }}
+                onClick={() => setSelectedLecturerTab("barred")}
+              >
+                ⛔ Cấm thi ({lecturerSections.barredGroups.length})
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -897,6 +920,18 @@ export function GroupsPage({
         ) : selectedLecturerTab === "unassigned" ? (
           <UnassignedGroupPanel
             groups={lecturerSections.unassignedGroups}
+            context={context}
+            data={data}
+            availableStudents={availableStudents}
+            lecturerById={lecturerById}
+            workbookById={workbookById}
+            onUpdate={commitGroupUpdate}
+            onDataChange={setData}
+            onNotice={onNotice}
+          />
+        ) : selectedLecturerTab === "barred" ? (
+          <BarredGroupPanel
+            groups={lecturerSections.barredGroups}
             context={context}
             data={data}
             availableStudents={availableStudents}
@@ -941,6 +976,20 @@ export function GroupsPage({
             {lecturerSections.unassignedGroups.length > 0 ? (
               <UnassignedGroupPanel
                 groups={lecturerSections.unassignedGroups}
+                context={context}
+                data={data}
+                availableStudents={availableStudents}
+                lecturerById={lecturerById}
+                workbookById={workbookById}
+                onUpdate={commitGroupUpdate}
+                onDataChange={setData}
+                onNotice={onNotice}
+              />
+            ) : null}
+
+            {lecturerSections.barredGroups.length > 0 ? (
+              <BarredGroupPanel
+                groups={lecturerSections.barredGroups}
                 context={context}
                 data={data}
                 availableStudents={availableStudents}
@@ -1217,6 +1266,98 @@ function UnassignedGroupPanel({
   );
 }
 
+function BarredGroupPanel({
+  groups,
+  context,
+  data,
+  availableStudents,
+  lecturerById,
+  workbookById,
+  onUpdate,
+  onDataChange,
+  onNotice,
+}: {
+  groups: GroupView[];
+  context: BatchContext;
+  data: AppData;
+  availableStudents: BatchContext["students"];
+  lecturerById: Map<string, Lecturer>;
+  workbookById: Map<string, SourceWorkbook>;
+  onUpdate: (result: { data: AppData; error?: string }) => void;
+  onDataChange: (next: AppData) => void;
+  onNotice: (tone: "info" | "success" | "warning" | "danger", text: string) => void;
+}) {
+  const studentCount = groups.reduce((sum, v) => sum + v.studentCount, 0);
+  return (
+    <div
+      style={{
+        background: "var(--surface)",
+        border: "1px solid var(--red)",
+        borderRadius: "12px",
+        boxShadow: "0 2px 10px rgba(224, 49, 49, 0.08)",
+        display: "flex",
+        flexDirection: "column",
+        height: "640px",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          padding: "14px 16px",
+          background: "rgba(224, 49, 49, 0.06)",
+          borderBottom: "1px solid rgba(224, 49, 49, 0.2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "8px",
+        }}
+      >
+        <div>
+          <strong style={{ fontSize: "1.05rem", color: "var(--red)" }}>
+            ⛔ Danh sách nhóm cấm thi (Ký hiệu xxx)
+          </strong>
+          <small className="muted" style={{ display: "block" }}>
+            Các sinh viên/nhóm này được đánh dấu cấm thi từ file nguồn, không tham gia phân công chấm thi.
+          </small>
+        </div>
+        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+          <Badge tone="danger">{groups.length} nhóm</Badge>
+          <Badge tone="neutral">{studentCount} SV</Badge>
+        </div>
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          scrollbarWidth: "thin",
+          scrollbarColor: "rgba(224, 49, 49, 0.3) transparent",
+        }}
+      >
+        {groups.map((view) => (
+          <GroupCard
+            key={view.group.id}
+            view={view}
+            context={context}
+            data={data}
+            availableStudents={availableStudents}
+            lecturerById={lecturerById}
+            workbookById={workbookById}
+            onUpdate={onUpdate}
+            onDataChange={onDataChange}
+            onNotice={onNotice}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function GroupCard({
   view,
   context,
@@ -1261,6 +1402,7 @@ function GroupCard({
   const isConflict = Boolean(
     view.group.graderId && groupAdvisorIds.includes(view.group.graderId),
   );
+  const isBarred = isBarredGroupCode(view.group.groupCode);
 
   const wbId =
     view.group.sourceWorkbookId ||
@@ -1305,7 +1447,9 @@ function GroupCard({
           </div>
           <p style={{ marginTop: "4px" }}>
             {view.studentCount} sinh viên ·{" "}
-            {grader ? (
+            {isBarred ? (
+              <Badge tone="danger">⛔ Cấm thi (Không chấm)</Badge>
+            ) : grader ? (
               <Badge tone={isConflict ? "danger" : "purple"}>
                 {isConflict ? "⛔ Xung đột: " : ""}GV chấm: {grader.displayName}
               </Badge>
@@ -1363,7 +1507,9 @@ function GroupCard({
                 )
               }
             >
-              <option value="">— Chưa phân công —</option>
+              <option value="">
+                {isBarred ? "— Cấm thi (Không chấm) —" : "— Chưa phân công —"}
+              </option>
               {activeLecturers.map((lecturer) => {
                 const isAdvisor = groupAdvisorIds.includes(lecturer.id);
                 return (
