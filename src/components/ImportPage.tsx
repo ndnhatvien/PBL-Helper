@@ -9,6 +9,7 @@ import {
   mergeDuplicatePendingWorkbooks,
 } from "../excel/importWorkbook";
 import { Badge, EmptyState, Notice, PageHeader } from "./shared";
+import { LecturersPanel } from "./LecturersPanel";
 
 interface ImportPageProps {
   data: AppData;
@@ -32,6 +33,7 @@ const MAPPING_FIELDS: Array<{
   { key: "courseCode", label: "Mã học phần", hint: "" },
   { key: "courseName", label: "Tên học phần", hint: "" },
   { key: "groupCode", label: "Mã nhóm (nguồn)", hint: "Chỉ để tham khảo" },
+  { key: "advisor", label: "GVHD (nếu có cột)", hint: "Giảng viên hướng dẫn" },
   { key: "score", label: "Cột điểm để xuất lại", hint: "Có thể thêm cột mới khi xuất" },
 ];
 
@@ -120,7 +122,12 @@ export function ImportPage({
 
   function reanalyze(
     workbook: PendingWorkbook,
-    options: { sheetName?: string; mapping?: ColumnMapping },
+    options: {
+      sheetName?: string;
+      mapping?: ColumnMapping;
+      metaLecturerName?: string | null;
+      metaLecturerNames?: string[];
+    },
   ) {
     try {
       const result = analyzeWorkbook({
@@ -130,6 +137,14 @@ export function ImportPage({
         sheetName: options.sheetName ?? workbook.sheetName,
         headerRow: options.mapping ? workbook.headerRow : undefined,
         mapping: options.mapping,
+        metaLecturerName:
+          options.metaLecturerName !== undefined
+            ? options.metaLecturerName
+            : workbook.metaLecturerName,
+        metaLecturerNames:
+          options.metaLecturerNames !== undefined
+            ? options.metaLecturerNames
+            : workbook.metaLecturerNames,
         tempId: workbook.tempId,
       });
       setPending((previous) =>
@@ -187,11 +202,11 @@ export function ImportPage({
   return (
     <div className="page">
       <PageHeader
-        title="Nhập danh sách Excel"
-        description="Đọc nhiều file, chọn sheet, ánh xạ cột và xem trước lỗi trước khi xác nhận nhập. File gốc được giữ nguyên để xuất lại."
+        title="Nhập danh sách SV & GVHD"
+        description="Đọc file Excel, gán GVHD (hỗ trợ đồng hướng dẫn), kiểm tra sơ bộ và xem trước lỗi trước khi xác nhận nhập."
         actions={
           <button type="button" className="button secondary" onClick={() => onNavigate("groups")}>
-            Sang quản lý nhóm
+            Sang quản lý nhóm & phân công
           </button>
         }
       />
@@ -369,6 +384,13 @@ export function ImportPage({
           </div>
         )}
       </section>
+
+      <LecturersPanel
+        data={data}
+        batch={batch}
+        onDataChange={setData}
+        onNotice={onNotice}
+      />
     </div>
   );
 }
@@ -380,7 +402,12 @@ function PendingWorkbookCard({
   onRemove,
 }: {
   workbook: PendingWorkbook;
-  onReanalyze: (options: { sheetName?: string; mapping?: ColumnMapping }) => void;
+  onReanalyze: (options: {
+    sheetName?: string;
+    mapping?: ColumnMapping;
+    metaLecturerName?: string | null;
+    metaLecturerNames?: string[];
+  }) => void;
   onMappingChange: (key: keyof ColumnMapping, rawValue: string) => void;
   onRemove: () => void;
 }) {
@@ -388,6 +415,44 @@ function PendingWorkbookCard({
     "all" | "error" | "missing_group" | "warning" | "valid"
   >("all");
   const [showAllRows, setShowAllRows] = useState(false);
+
+  const currentAdvisors = useMemo(() => {
+    if (workbook.metaLecturerNames && workbook.metaLecturerNames.length > 0) {
+      return workbook.metaLecturerNames;
+    }
+    if (workbook.metaLecturerName) {
+      return [workbook.metaLecturerName];
+    }
+    return [""];
+  }, [workbook.metaLecturerNames, workbook.metaLecturerName]);
+
+  function handleAdvisorChange(index: number, value: string) {
+    const next = [...currentAdvisors];
+    while (next.length <= index) next.push("");
+    next[index] = value;
+    const cleaned = next.filter((n, i) => n.trim() || i === 0);
+    onReanalyze({
+      metaLecturerNames: cleaned.map((n) => n.trim()).filter(Boolean),
+      metaLecturerName: cleaned.filter(Boolean).join(", "),
+    });
+  }
+
+  function handleAddCoAdvisor() {
+    const next = [...currentAdvisors, ""];
+    onReanalyze({
+      metaLecturerNames: next.map((n) => n.trim()).filter(Boolean),
+      metaLecturerName: next.filter(Boolean).join(", "),
+    });
+  }
+
+  function handleRemoveAdvisor(index: number) {
+    const next = currentAdvisors.filter((_, i) => i !== index);
+    const cleaned = next.length > 0 ? next : [""];
+    onReanalyze({
+      metaLecturerNames: cleaned.map((n) => n.trim()).filter(Boolean),
+      metaLecturerName: cleaned.filter(Boolean).join(", "),
+    });
+  }
 
   const errorRows = useMemo(
     () => workbook.rows.filter((r) => r.errors.length > 0),
@@ -498,12 +563,80 @@ function PendingWorkbookCard({
             <strong>{workbook.metaCourseName}</strong>
           </div>
         ) : null}
-        {workbook.metaLecturerName ? (
-          <div className="field">
-            <span>Giảng viên đọc từ sheet</span>
-            <strong>{workbook.metaLecturerName}</strong>
+      </div>
+
+      <div
+        style={{
+          marginTop: "12px",
+          marginBottom: "12px",
+          padding: "12px",
+          background: "var(--surface-sunken)",
+          borderRadius: "8px",
+          border: "1px solid var(--border-soft)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "8px",
+            flexWrap: "wrap",
+            gap: "8px",
+          }}
+        >
+          <div>
+            <strong>👨‍🏫 Giảng viên hướng dẫn (GVHD) của file</strong>
+            <small style={{ display: "block", color: "var(--muted)" }}>
+              Hệ thống hỗ trợ 1 hoặc 2 giảng viên cùng hướng dẫn (đồng hướng dẫn). GVHD sẽ được lưu và tự động loại trừ khi phân công chấm.
+            </small>
           </div>
-        ) : null}
+          {currentAdvisors.length < 2 ? (
+            <button
+              type="button"
+              className="button small secondary"
+              onClick={handleAddCoAdvisor}
+            >
+              + Thêm GVHD đồng hướng dẫn
+            </button>
+          ) : null}
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns:
+              currentAdvisors.length > 1 ? "1fr 1fr" : "1fr",
+            gap: "12px",
+          }}
+        >
+          {currentAdvisors.map((adv, idx) => (
+            <label className="field" key={idx} style={{ margin: 0 }}>
+              <span>
+                {idx === 0
+                  ? "GVHD chính (GVHD 1)"
+                  : `GVHD đồng hướng dẫn (GVHD ${idx + 1})`}
+              </span>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input
+                  type="text"
+                  value={adv}
+                  placeholder={`Nhập tên GVHD ${idx + 1}...`}
+                  onChange={(e) => handleAdvisorChange(idx, e.target.value)}
+                />
+                {idx > 0 ? (
+                  <button
+                    type="button"
+                    className="button small ghost"
+                    title="Xóa GVHD đồng hướng dẫn"
+                    onClick={() => handleRemoveAdvisor(idx)}
+                  >
+                    ✕
+                  </button>
+                ) : null}
+              </div>
+            </label>
+          ))}
+        </div>
       </div>
 
       <div className="mapping-grid">
@@ -698,13 +831,14 @@ function PendingWorkbookCard({
               <th>Lớp</th>
               <th>Mã HP</th>
               <th>Nhóm nguồn</th>
+              <th>GVHD</th>
               <th>Trạng thái kiểm tra</th>
             </tr>
           </thead>
           <tbody>
             {displayRows.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: "16px", color: "var(--muted)" }}>
+                <td colSpan={8} style={{ textAlign: "center", padding: "16px", color: "var(--muted)" }}>
                   Không có dòng nào theo bộ lọc này.
                 </td>
               </tr>
@@ -714,6 +848,11 @@ function PendingWorkbookCard({
                   workbook.mapping.groupCode !== null && !row.groupCode;
                 const hasError = row.errors.length > 0;
                 const hasWarning = row.warnings.length > 0;
+                const rowAdvisor =
+                  row.advisorName ||
+                  (workbook.metaLecturerNames?.length
+                    ? workbook.metaLecturerNames.join(", ")
+                    : workbook.metaLecturerName || "");
 
                 return (
                   <tr
@@ -742,6 +881,7 @@ function PendingWorkbookCard({
                         "—"
                       )}
                     </td>
+                    <td>{rowAdvisor || "—"}</td>
                     <td>
                       {hasError ? (
                         <Badge tone="danger">{row.errors.join("; ")}</Badge>

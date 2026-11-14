@@ -186,10 +186,7 @@ export function DashboardPage({
 
             <div className="quick-actions">
               <button type="button" className="button secondary" onClick={() => onNavigate("groups")}>
-                Quản lý nhóm PBL
-              </button>
-              <button type="button" className="button secondary" onClick={() => onNavigate("assignment")}>
-                Phân công chấm
+                Quản lý nhóm & Phân công chấm
               </button>
               <button type="button" className="button secondary" onClick={() => onNavigate("grader-export")}>
                 Xuất file chấm

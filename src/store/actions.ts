@@ -13,8 +13,11 @@ import type {
   Student,
 } from "../types";
 import type { AppData } from "./store";
-import { getEffectiveAdvisorId } from "../domain/advisor";
-import { findCrossFileDuplicateIssues } from "../excel/importWorkbook";
+import { getEffectiveAdvisorId, getGroupAdvisorIds } from "../domain/advisor";
+import {
+  findCrossFileDuplicateIssues,
+  splitLecturerNames,
+} from "../excel/importWorkbook";
 import { createId, nowIso } from "../utils/id";
 
 export interface ActionResult {
@@ -131,18 +134,48 @@ export function commitSourceWorkbooks(
   const warnings: string[] = [];
 
   for (const pending of pendingWorkbooks) {
-    const lecturerName = pending.metaLecturerName?.trim() || null;
-    if (lecturerName && !existingLecturerNames.has(lecturerName.toLowerCase())) {
-      existingLecturerNames.add(lecturerName.toLowerCase());
-      newLecturers.push({
-        id: createId("lec"),
-        batchId,
-        displayName: lecturerName,
-        email: "",
-        active: true,
-        room: "",
-      });
+    const rawNames = pending.metaLecturerNames?.length
+      ? pending.metaLecturerNames
+      : pending.metaLecturerName
+        ? splitLecturerNames(pending.metaLecturerName)
+        : [];
+
+    for (const row of pending.rows) {
+      if (row.advisorName) {
+        const splitRowAdv = splitLecturerNames(row.advisorName);
+        for (const name of splitRowAdv) {
+          if (!rawNames.includes(name)) {
+            rawNames.push(name);
+          }
+        }
+      }
     }
+
+    for (const name of rawNames) {
+      const clean = name.trim();
+      if (clean && !existingLecturerNames.has(clean.toLowerCase())) {
+        existingLecturerNames.add(clean.toLowerCase());
+        newLecturers.push({
+          id: createId("lec"),
+          batchId,
+          displayName: clean,
+          email: "",
+          active: true,
+          room: "",
+        });
+      }
+    }
+
+    const primaryLecturerName =
+      pending.metaLecturerName?.trim() ||
+      (pending.metaLecturerNames && pending.metaLecturerNames.length > 0
+        ? pending.metaLecturerNames.join(", ")
+        : null);
+    const workbookLecturerNames = pending.metaLecturerNames?.length
+      ? pending.metaLecturerNames
+      : primaryLecturerName
+        ? splitLecturerNames(primaryLecturerName)
+        : [];
 
     const workbook: SourceWorkbook = {
       id: createId("wb"),
@@ -159,7 +192,8 @@ export function commitSourceWorkbooks(
       importedAt,
       metaCourseCode: pending.metaCourseCode,
       metaCourseName: pending.metaCourseName,
-      metaLecturerName: lecturerName,
+      metaLecturerName: primaryLecturerName,
+      metaLecturerNames: workbookLecturerNames,
       sourceTemplate: pending.sourceTemplate ?? "custom",
     };
     newWorkbooks.push(workbook);
@@ -174,6 +208,11 @@ export function commitSourceWorkbooks(
         courseCode: row.courseCode,
         courseName: row.courseName,
         groupCodeFromSource: row.groupCode,
+        advisorNameFromSource:
+          row.advisorName ||
+          (workbookLecturerNames.length > 0
+            ? workbookLecturerNames.join(", ")
+            : undefined),
         sourceWorkbookId: workbook.id,
         sourceSheetName: pending.sheetName,
         sourceRowNumber: row.sourceRowNumber,
@@ -424,19 +463,40 @@ export function autoCreateGroupsFromSource(
       );
       let defaultAdvisorId: string | null = null;
       for (const student of students) {
+        if (student.advisorNameFromSource) {
+          const splitNames = splitLecturerNames(student.advisorNameFromSource);
+          for (const sName of splitNames) {
+            const lec = nextData.lecturers.find(
+              (l) =>
+                l.batchId === batchId &&
+                l.displayName.trim().toLowerCase() === sName.trim().toLowerCase(),
+            );
+            if (lec) {
+              defaultAdvisorId = lec.id;
+              break;
+            }
+          }
+          if (defaultAdvisorId) break;
+        }
+
         const wb = workbookMap.get(student.sourceWorkbookId);
-        const lecName = wb?.metaLecturerName?.trim();
-        if (lecName) {
+        const wbNames = wb?.metaLecturerNames?.length
+          ? wb.metaLecturerNames
+          : wb?.metaLecturerName
+            ? splitLecturerNames(wb.metaLecturerName)
+            : [];
+        for (const wbName of wbNames) {
           const lec = nextData.lecturers.find(
             (l) =>
               l.batchId === batchId &&
-              l.displayName.trim().toLowerCase() === lecName.toLowerCase(),
+              l.displayName.trim().toLowerCase() === wbName.trim().toLowerCase(),
           );
           if (lec) {
             defaultAdvisorId = lec.id;
             break;
           }
         }
+        if (defaultAdvisorId) break;
       }
       const createResult = createGroup(
         nextData,
@@ -447,6 +507,27 @@ export function autoCreateGroupsFromSource(
       );
       if (!createResult.error) {
         nextData = createResult.data;
+        if (defaultAdvisorId) {
+          nextData = {
+            ...nextData,
+            members: nextData.members.map((m) => {
+              const st = students.find((s) => s.id === m.studentId);
+              if (!st?.advisorNameFromSource) return m;
+              const sNames = splitLecturerNames(st.advisorNameFromSource);
+              const matchedLec = nextData.lecturers.find(
+                (l) =>
+                  l.batchId === batchId &&
+                  sNames.some(
+                    (sn) => sn.toLowerCase() === l.displayName.trim().toLowerCase(),
+                  ),
+              );
+              if (matchedLec && matchedLec.id !== defaultAdvisorId) {
+                return { ...m, advisorOverrideId: matchedLec.id };
+              }
+              return m;
+            }),
+          };
+        }
         createdCount += 1;
       }
     }
@@ -489,6 +570,15 @@ export function updateGroup(
         lecturer.batchId === group.batchId,
     );
     if (!advisor) return { data, error: "GVHD mặc định không hợp lệ." };
+
+    const currentGraderId =
+      patch.graderId !== undefined ? patch.graderId : group.graderId;
+    if (currentGraderId && currentGraderId === patch.defaultAdvisorId) {
+      return {
+        data,
+        error: `Xung đột quyền lợi: Giảng viên "${advisor.displayName}" đang được phân công chấm nhóm này nên không thể đặt làm GVHD.`,
+      };
+    }
   }
   if (patch.graderId) {
     const grader = data.lecturers.find(
@@ -496,6 +586,20 @@ export function updateGroup(
         lecturer.id === patch.graderId && lecturer.batchId === group.batchId,
     );
     if (!grader) return { data, error: "Giảng viên chấm không hợp lệ." };
+
+    const advisorIds = getGroupAdvisorIds(
+      { ...group, ...patch },
+      data.members,
+      data.students,
+      data.lecturers,
+      data.sourceWorkbooks,
+    );
+    if (advisorIds.includes(patch.graderId)) {
+      return {
+        data,
+        error: `Xung đột quyền lợi: Giảng viên "${grader.displayName}" là GVHD của nhóm này nên không được phân công chấm nhóm này.`,
+      };
+    }
   }
   return {
     data: {

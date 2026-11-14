@@ -48,4 +48,15 @@ describe("phân công giảng viên chấm", () => {
     expect(result.assignments).toEqual({});
     expect(result.workload).toEqual([]);
   });
+
+  it("không phân công giảng viên chấm nhóm mà mình hướng dẫn (chống GVHD tự chấm)", () => {
+    // Nhóm g1 có GVHD là gv1 và gv2 (đồng hướng dẫn). Chỉ có gv3 được phép chấm g1.
+    const testGroups: AssignmentGroupInput[] = [
+      { id: "g1", groupCode: "PBL01", studentCount: 3, excludedLecturerIds: ["gv1", "gv2"] },
+      { id: "g2", groupCode: "PBL02", studentCount: 3, excludedLecturerIds: ["gv3"] },
+    ];
+    const result = suggestAssignment(testGroups, ["gv1", "gv2", "gv3"], "students");
+    expect(result.assignments["g1"]).toBe("gv3");
+    expect(result.assignments["g2"]).not.toBe("gv3");
+  });
 });

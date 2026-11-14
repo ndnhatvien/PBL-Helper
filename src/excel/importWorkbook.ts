@@ -17,7 +17,17 @@ export interface HeaderDetection {
   metaCourseCode: string | null;
   metaCourseName: string | null;
   metaLecturerName: string | null;
+  metaLecturerNames?: string[];
   sourceTemplate: "bang_diem" | "dsts" | "custom";
+}
+
+export function splitLecturerNames(raw: string): string[] {
+  if (!raw) return [];
+  const parts = raw
+    .split(/\s+v\u00e0\s+|\s*&\s*|\s*,\s*|\s*;\s*/i)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  return parts.length > 0 ? parts : [raw.trim()];
 }
 
 export const EMPTY_MAPPING: ColumnMapping = {
@@ -27,6 +37,7 @@ export const EMPTY_MAPPING: ColumnMapping = {
   courseCode: null,
   courseName: null,
   groupCode: null,
+  advisor: null,
   score: null,
 };
 
@@ -94,6 +105,20 @@ function matchesGroup(value: string): boolean {
   );
 }
 
+function matchesAdvisor(value: string): boolean {
+  const text = normalizeText(value);
+  return (
+    text === "gvhd" ||
+    text === "cbhd" ||
+    text === "advisor" ||
+    text.includes("giang vien huong dan") ||
+    text.includes("can bo huong dan") ||
+    text.includes("nguoi huong dan") ||
+    text.includes("gv huong dan") ||
+    text === "giang vien hd"
+  );
+}
+
 function matchesScore(value: string): boolean {
   const text = normalizeText(value);
   if (text.includes("chu")) return false;
@@ -126,6 +151,8 @@ export function detectMapping(headers: string[]): ColumnMapping {
       mapping.courseName = index;
     else if (mapping.groupCode === null && matchesGroup(header))
       mapping.groupCode = index;
+    else if (mapping.advisor === null && matchesAdvisor(header))
+      mapping.advisor = index;
     else if (mapping.score === null && matchesScore(header)) mapping.score = index;
   });
 
@@ -360,10 +387,12 @@ function extractMetadata(
   metaCourseCode: string | null;
   metaCourseName: string | null;
   metaLecturerName: string | null;
+  metaLecturerNames: string[];
 } {
   let metaCourseCode: string | null = null;
   let metaCourseName: string | null = null;
   let metaLecturerName: string | null = null;
+  const lecturerList: string[] = [];
 
   for (let rowIndex = 0; rowIndex < headerRow; rowIndex += 1) {
     const row = matrix[rowIndex] ?? [];
@@ -397,17 +426,38 @@ function extractMetadata(
       ) {
         metaCourseName = value;
       } else if (
-        !metaLecturerName &&
-        (cleanLabel === "giang vien" ||
-          cleanLabel.includes("giang vien") ||
-          cleanLabel === "gvhd")
+        cleanLabel === "giang vien" ||
+        cleanLabel.includes("giang vien") ||
+        cleanLabel === "gvhd" ||
+        cleanLabel.includes("gvhd") ||
+        cleanLabel.includes("huong dan")
       ) {
-        metaLecturerName = value;
+        const split = splitLecturerNames(value);
+        for (const name of split) {
+          if (!lecturerList.includes(name)) {
+            lecturerList.push(name);
+          }
+        }
+        if (!metaLecturerName) {
+          metaLecturerName = value;
+        }
       }
     }
   }
 
-  return { metaCourseCode, metaCourseName, metaLecturerName };
+  const metaLecturerNames =
+    lecturerList.length > 0
+      ? lecturerList
+      : metaLecturerName
+        ? splitLecturerNames(metaLecturerName)
+        : [];
+
+  return {
+    metaCourseCode,
+    metaCourseName,
+    metaLecturerName: metaLecturerNames.join(", ") || metaLecturerName,
+    metaLecturerNames,
+  };
 }
 
 function isRepeatedHeader(
@@ -640,6 +690,11 @@ export function parseRowsWithMapping(
     const rawGroupCode =
       mapping.groupCode !== null ? cellText(row[mapping.groupCode]) : "";
     const groupCode = rawGroupCode.trim();
+    const rawAdvisor =
+      mapping.advisor !== null && mapping.advisor !== undefined
+        ? cellText(row[mapping.advisor])
+        : "";
+    const advisorName = rawAdvisor.trim();
     const courseCode =
       ((mapping.courseCode !== null ? cellText(row[mapping.courseCode]) : "") ||
       metaCourseCode ||
@@ -711,6 +766,7 @@ export function parseRowsWithMapping(
       courseCode,
       courseName,
       groupCode,
+      advisorName: advisorName || undefined,
       originalRowData: row,
       errors: rowErrors,
       warnings: rowWarnings,
@@ -761,6 +817,8 @@ export interface AnalyzeOptions {
   headerRow?: number;
   mapping?: ColumnMapping;
   tempId?: string;
+  metaLecturerName?: string | null;
+  metaLecturerNames?: string[];
 }
 
 export interface AnalyzeResult {
@@ -814,7 +872,15 @@ export function analyzeWorkbook(options: AnalyzeOptions): AnalyzeResult {
     mapping.courseCode === null ? detected.metaCourseCode : detected.metaCourseCode;
   const metaCourseName =
     mapping.courseName === null ? detected.metaCourseName : detected.metaCourseName;
-  const metaLecturerName = detected.metaLecturerName;
+  const metaLecturerName =
+    options.metaLecturerName !== undefined
+      ? options.metaLecturerName
+      : detected.metaLecturerName;
+  const metaLecturerNames =
+    options.metaLecturerNames !== undefined
+      ? options.metaLecturerNames
+      : (detected.metaLecturerNames ??
+        (metaLecturerName ? splitLecturerNames(metaLecturerName) : []));
   const sourceTemplate = detected.sourceTemplate;
 
   const parsed = parseRowsWithMapping(
@@ -840,6 +906,7 @@ export function analyzeWorkbook(options: AnalyzeOptions): AnalyzeResult {
     metaCourseCode,
     metaCourseName,
     metaLecturerName,
+    metaLecturerNames,
     sourceTemplate,
     errors: parsed.errors,
     warnings: parsed.warnings,

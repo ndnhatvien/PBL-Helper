@@ -2,6 +2,7 @@ export interface AssignmentGroupInput {
   id: string;
   groupCode: string;
   studentCount: number;
+  excludedLecturerIds?: string[];
 }
 
 export type BalanceMode = "students" | "groups";
@@ -19,6 +20,7 @@ export interface AssignmentResult {
  * Gợi ý phân công nhóm PBL cho giảng viên chấm.
  *
  * Quy tắc bắt buộc:
+ * - Giảng viên chấm KHÔNG ĐƯỢC CHẤM nhóm/sinh viên mình hướng dẫn (loại trừ excludedLecturerIds).
  * - Nhóm là đơn vị phân công, không chia thành viên của một nhóm.
  * - Sắp xếp nhóm giảm dần theo sĩ số.
  * - Mặc định chọn giảng viên có tổng sinh viên ít nhất; hòa thì ít nhóm hơn;
@@ -49,8 +51,13 @@ export function suggestAssignment(
   const assignments: Record<string, string> = {};
 
   for (const group of sortedGroups) {
-    let chosen = workload[0];
-    for (const candidate of workload) {
+    const excluded = new Set(group.excludedLecturerIds ?? []);
+    const eligible = workload.filter((w) => !excluded.has(w.lecturerId));
+    // Nếu tất cả giảng viên đều là GVHD của nhóm, fallback sang danh sách đầy đủ
+    const candidates = eligible.length > 0 ? eligible : workload;
+
+    let chosen = candidates[0];
+    for (const candidate of candidates) {
       const primary =
         mode === "students"
           ? candidate.studentCount - chosen.studentCount

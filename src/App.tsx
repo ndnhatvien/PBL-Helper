@@ -7,7 +7,6 @@ import { createDemoData } from "./demo";
 import { DashboardPage } from "./components/DashboardPage";
 import { ImportPage } from "./components/ImportPage";
 import { GroupsPage } from "./components/GroupsPage";
-import { AssignmentPage } from "./components/AssignmentPage";
 import { GraderExportPage } from "./components/GraderExportPage";
 import { GradedImportPage } from "./components/GradedImportPage";
 import { ReviewPage } from "./components/ReviewPage";
@@ -26,13 +25,12 @@ type PageId =
 
 const PAGES: Array<{ id: PageId; label: string; short: string }> = [
   { id: "overview", label: "Tổng quan", short: "01" },
-  { id: "import", label: "Nhập danh sách Excel", short: "02" },
-  { id: "groups", label: "Quản lý nhóm PBL", short: "03" },
-  { id: "assignment", label: "Phân công chấm", short: "04" },
-  { id: "grader-export", label: "Xuất file chấm", short: "05" },
-  { id: "graded-import", label: "Nhập điểm đã chấm", short: "06" },
-  { id: "review", label: "GVHD rà soát điểm", short: "07" },
-  { id: "final-export", label: "Xuất danh sách cuối", short: "08" },
+  { id: "import", label: "Nhập danh sách SV & GVHD", short: "02" },
+  { id: "groups", label: "Quản lý nhóm & Phân công chấm", short: "03" },
+  { id: "grader-export", label: "Xuất file chấm", short: "04" },
+  { id: "graded-import", label: "Nhập điểm đã chấm", short: "05" },
+  { id: "review", label: "GVHD rà soát điểm", short: "06" },
+  { id: "final-export", label: "Xuất danh sách cuối", short: "07" },
 ];
 
 type NoticeState = {
@@ -120,7 +118,8 @@ export default function App() {
     batch,
     context,
     stats,
-    onNavigate: (next: string) => setPage(next as PageId),
+    onNavigate: (next: string) =>
+      setPage(next === "assignment" ? "groups" : (next as PageId)),
     onNotice,
     notice,
     onCloseNotice: () => setNotice(null),
@@ -229,26 +228,15 @@ export default function App() {
           />
         ) : null}
 
-        {page === "groups" ? (
+        {page === "groups" || (page as string) === "assignment" ? (
           <GroupsPage
             data={data}
             setData={setData}
             context={context}
             batch={batch}
-            onNavigate={(next) => setPage(next as PageId)}
-            onNotice={onNotice}
-            notice={notice}
-            onCloseNotice={() => setNotice(null)}
-          />
-        ) : null}
-
-        {page === "assignment" ? (
-          <AssignmentPage
-            data={data}
-            setData={setData}
-            context={context}
-            batch={batch}
-            onNavigate={(next) => setPage(next as PageId)}
+            onNavigate={(next) =>
+              setPage(next === "assignment" ? "groups" : (next as PageId))
+            }
             onNotice={onNotice}
             notice={notice}
             onCloseNotice={() => setNotice(null)}

@@ -34,6 +34,7 @@ export interface ColumnMapping {
   courseCode: number | null;
   courseName: number | null;
   groupCode: number | null;
+  advisor: number | null;
   score: number | null;
 }
 
@@ -53,6 +54,7 @@ export interface SourceWorkbook {
   metaCourseCode: string | null;
   metaCourseName: string | null;
   metaLecturerName?: string | null;
+  metaLecturerNames?: string[];
   sourceTemplate?: "bang_diem" | "dsts" | "custom";
 }
 
@@ -65,6 +67,7 @@ export interface Student {
   courseCode: string;
   courseName: string;
   groupCodeFromSource: string;
+  advisorNameFromSource?: string;
   sourceWorkbookId: string;
   sourceSheetName: string;
   sourceRowNumber: number;
@@ -163,6 +166,7 @@ export interface ParsedStudentRow {
   courseCode: string;
   courseName: string;
   groupCode: string;
+  advisorName?: string;
   originalRowData: unknown[];
   errors: string[];
   warnings: string[];
@@ -211,6 +215,7 @@ export interface PendingWorkbook {
   metaCourseCode: string | null;
   metaCourseName: string | null;
   metaLecturerName?: string | null;
+  metaLecturerNames?: string[];
   sourceTemplate?: "bang_diem" | "dsts" | "custom";
   errors: string[];
   warnings: string[];

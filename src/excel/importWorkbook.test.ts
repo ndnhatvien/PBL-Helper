@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   analyzeWorkbook,
+  detectMapping,
   findCrossFileDuplicateIssues,
   mergeDuplicatePendingWorkbooks,
   parseRowsWithMapping,
@@ -46,6 +47,7 @@ describe("đọc file Excel mẫu", () => {
       courseCode: null,
       courseName: null,
       groupCode: 4,
+      advisor: null,
       score: 5,
     });
     expect(pending.metaCourseCode).toBe("106337026102438B");
@@ -383,5 +385,19 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
     expect(createdGroup).toBeDefined();
     const members = autoResult.data.members.filter((m) => m.groupId === createdGroup!.id);
     expect(members).toHaveLength(2);
+  });
+
+  it("nhận diện cột GVHD và gán đúng advisor cho nhóm tự động", () => {
+    const matrix = [
+      ["STT", "MSSV", "Họ tên", "Lớp", "Nhóm", "GVHD"],
+      [1, "101", "Nguyễn Văn A", "20DT1", "GRP01", "TS. Trần Văn B"],
+      [2, "102", "Lê Văn C", "20DT1", "GRP01", "TS. Trần Văn B"],
+    ];
+    const headerRow = 0;
+    const mapping = detectMapping(matrix[0].map(String));
+    expect(mapping.advisor).toBe(5);
+
+    const parsed = parseRowsWithMapping(matrix, headerRow, mapping, "HP01", "Học phần 1");
+    expect(parsed.rows[0].advisorName).toBe("TS. Trần Văn B");
   });
 });

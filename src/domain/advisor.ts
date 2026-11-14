@@ -1,4 +1,12 @@
-import type { AdvisorSource, ReviewStatus } from "../types";
+import type {
+  AdvisorSource,
+  GroupMember,
+  Lecturer,
+  PblGroup,
+  ReviewStatus,
+  SourceWorkbook,
+  Student,
+} from "../types";
 
 export function getEffectiveAdvisorId(
   studentOverrideId: string | null | undefined,
@@ -60,4 +68,57 @@ export function reviewStatusForStudent(
       return bt.localeCompare(at);
     })[0];
   return latest?.status ?? "pending";
+}
+
+/**
+ * Trích xuất toàn bộ danh sách ID của các GVHD liên quan đến nhóm:
+ * bao gồm GVHD mặc định nhóm, GVHD override của thành viên, GVHD từ cột file nguồn,
+ * và các GVHD đồng hướng dẫn của file nguồn.
+ * Dùng để loại trừ triệt để khi phân công chấm (chống GVHD tự chấm).
+ */
+export function getGroupAdvisorIds(
+  group: PblGroup,
+  members: GroupMember[],
+  students: Student[],
+  lecturers: Lecturer[],
+  sourceWorkbooks?: SourceWorkbook[],
+): string[] {
+  const advisorIds = new Set<string>();
+  if (group.defaultAdvisorId) {
+    advisorIds.add(group.defaultAdvisorId);
+  }
+
+  const studentMap = new Map(students.map((s) => [s.id, s]));
+  const lecturerMapByName = new Map(
+    lecturers.map((l) => [l.displayName.trim().toLowerCase(), l.id]),
+  );
+  const workbookMap = new Map((sourceWorkbooks ?? []).map((wb) => [wb.id, wb]));
+
+  for (const member of members) {
+    if (member.groupId !== group.id) continue;
+    if (member.advisorOverrideId) {
+      advisorIds.add(member.advisorOverrideId);
+    }
+    const student = studentMap.get(member.studentId);
+    if (student?.advisorNameFromSource) {
+      const id = lecturerMapByName.get(
+        student.advisorNameFromSource.trim().toLowerCase(),
+      );
+      if (id) advisorIds.add(id);
+    }
+    if (student?.sourceWorkbookId) {
+      const wb = workbookMap.get(student.sourceWorkbookId);
+      const names = wb?.metaLecturerNames?.length
+        ? wb.metaLecturerNames
+        : wb?.metaLecturerName
+          ? [wb.metaLecturerName]
+          : [];
+      for (const name of names) {
+        const id = lecturerMapByName.get(name.trim().toLowerCase());
+        if (id) advisorIds.add(id);
+      }
+    }
+  }
+
+  return Array.from(advisorIds);
 }

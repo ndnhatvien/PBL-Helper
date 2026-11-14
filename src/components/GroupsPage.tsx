@@ -3,16 +3,27 @@ import type { ExamBatch, GroupView } from "../types";
 import type { AppData } from "../store/store";
 import type { BatchContext } from "../domain/selectors";
 import { getAvailableStudents, getGroupViews } from "../domain/selectors";
+import type { BalanceMode } from "../domain/assignment";
+import { suggestAssignment } from "../domain/assignment";
+import { getGroupAdvisorIds } from "../domain/advisor";
 import {
   addGroupMember,
+  applyAssignments,
   autoCreateGroupsFromSource,
   createGroup,
   deleteGroup,
   removeGroupMember,
   updateGroup,
+  updateLecturer,
   updateMemberOverride,
 } from "../store/actions";
-import { Badge, EmptyState, Notice, PageHeader } from "./shared";
+import {
+  Badge,
+  EditableRoomCell,
+  EmptyState,
+  Notice,
+  PageHeader,
+} from "./shared";
 import { LecturersPanel } from "./LecturersPanel";
 
 interface GroupsPageProps {
@@ -45,6 +56,7 @@ export function GroupsPage({
   const [groupCode, setGroupCode] = useState("");
   const [advisorId, setAdvisorId] = useState("");
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [mode, setMode] = useState<BalanceMode>("students");
 
   const availableStudents = useMemo(() => getAvailableStudents(context), [context]);
   const availableWithGroup = useMemo(
@@ -62,10 +74,33 @@ export function GroupsPage({
     [context.sourceWorkbooks],
   );
 
+  const workload = useMemo(
+    () =>
+      activeLecturers
+        .map((lecturer) => {
+          const groups = groupViews.filter(
+            (view) => view.group.graderId === lecturer.id,
+          );
+          return {
+            lecturer,
+            groupCount: groups.length,
+            studentCount: groups.reduce(
+              (total, view) => total + view.studentCount,
+              0,
+            ),
+          };
+        })
+        .sort((a, b) => b.studentCount - a.studentCount),
+    [activeLecturers, groupViews],
+  );
+
   if (!batch) {
     return (
       <div className="page">
-        <PageHeader title="Quản lý nhóm PBL" description="Chọn đợt thi trước." />
+        <PageHeader
+          title="Quản lý nhóm PBL & Phân công chấm"
+          description="Chọn đợt thi trước."
+        />
         <EmptyState title="Chưa có đợt thi" />
       </div>
     );
@@ -107,14 +142,53 @@ export function GroupsPage({
     setData(result.data);
   }
 
+  function handleSuggest() {
+    if (groupViews.length === 0) {
+      onNotice("danger", "Chưa có nhóm PBL để phân công.");
+      return;
+    }
+    if (activeLecturers.length === 0) {
+      onNotice(
+        "danger",
+        "Chưa có giảng viên đang hoạt động. Hãy thêm giảng viên trước.",
+      );
+      return;
+    }
+    const result = suggestAssignment(
+      groupViews.map((view) => ({
+        id: view.group.id,
+        groupCode: view.group.groupCode,
+        studentCount: view.studentCount,
+        excludedLecturerIds: getGroupAdvisorIds(
+          view.group,
+          context.members,
+          context.students,
+          context.lecturers,
+          data.sourceWorkbooks,
+        ),
+      })),
+      activeLecturers.map((lecturer) => lecturer.id),
+      mode,
+    );
+    setData(applyAssignments(data, result.assignments));
+    onNotice(
+      "success",
+      `Đã gợi ý phân công theo ${mode === "students" ? "số sinh viên" : "số nhóm"} (đã loại trừ toàn bộ GVHD của từng nhóm). Bạn có thể điều chỉnh thủ công từng nhóm bên dưới.`,
+    );
+  }
+
   return (
     <div className="page">
       <PageHeader
-        title="Quản lý nhóm PBL và GVHD"
-        description="Tạo nhóm xuyên nhiều file nguồn, gán GVHD mặc định của nhóm và GVHD ngoại lệ theo từng sinh viên."
+        title="Quản lý nhóm PBL & Phân công chấm"
+        description="Tạo nhóm PBL, gán GVHD (quy chế: GVHD không chấm sinh viên mình hướng dẫn) và phân công cân bằng giảng viên chấm."
         actions={
-          <button type="button" className="button secondary" onClick={() => onNavigate("assignment")}>
-            Sang phân công chấm
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => onNavigate("grader-export")}
+          >
+            Sang xuất file chấm
           </button>
         }
       />
@@ -131,6 +205,109 @@ export function GroupsPage({
         onDataChange={setData}
         onNotice={onNotice}
       />
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h2>Phân công giảng viên chấm &amp; Cân bằng khối lượng</h2>
+            <p className="muted">
+              Cân bằng khối lượng theo số sinh viên (mặc định) hoặc theo số nhóm. Hệ thống tuyệt đối không phân công GVHD chấm nhóm mình hướng dẫn.
+            </p>
+          </div>
+          <Badge tone="info">
+            {groupViews.length} nhóm · {activeLecturers.length} GV hoạt động
+          </Badge>
+        </div>
+
+        <div className="radio-row">
+          <label className="checkbox-line">
+            <input
+              type="radio"
+              name="balance-mode"
+              checked={mode === "students"}
+              onChange={() => setMode("students")}
+            />
+            <span>Cân bằng theo số sinh viên (mặc định)</span>
+          </label>
+          <label className="checkbox-line">
+            <input
+              type="radio"
+              name="balance-mode"
+              checked={mode === "groups"}
+              onChange={() => setMode("groups")}
+            />
+            <span>Cân bằng theo số nhóm</span>
+          </label>
+          <button type="button" className="button" onClick={handleSuggest}>
+            ⚡ Gợi ý phân công tự động
+          </button>
+        </div>
+
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Giảng viên chấm</th>
+                <th>Email</th>
+                <th>Phòng chấm</th>
+                <th>Số nhóm phụ trách</th>
+                <th>Số sinh viên phụ trách</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workload.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={5}
+                    style={{
+                      textAlign: "center",
+                      padding: "16px",
+                      color: "var(--muted)",
+                    }}
+                  >
+                    Chưa có giảng viên đang hoạt động.
+                  </td>
+                </tr>
+              ) : (
+                workload.map((row) => (
+                  <tr key={row.lecturer.id}>
+                    <td>
+                      <strong>{row.lecturer.displayName}</strong>
+                    </td>
+                    <td>{row.lecturer.email || "—"}</td>
+                    <td>
+                      <EditableRoomCell
+                        value={row.lecturer.room ?? ""}
+                        onSave={(next) => {
+                          setData(
+                            updateLecturer(data, row.lecturer.id, {
+                              room: next,
+                            }),
+                          );
+                          onNotice(
+                            "success",
+                            `Đã cập nhật phòng chấm cho ${row.lecturer.displayName}: ${next || "(trống)"}`,
+                          );
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <Badge tone={row.groupCount > 0 ? "info" : "neutral"}>
+                        {row.groupCount} nhóm
+                      </Badge>
+                    </td>
+                    <td>
+                      <Badge tone={row.studentCount > 0 ? "purple" : "neutral"}>
+                        {row.studentCount} SV
+                      </Badge>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="panel">
         <div className="panel-header">
@@ -282,6 +459,27 @@ function GroupCard({
 }) {
   const activeLecturers = context.lecturers.filter((lecturer) => lecturer.active);
   const grader = view.group.graderId ? lecturerById.get(view.group.graderId) : null;
+  const groupAdvisorIds = useMemo(
+    () =>
+      getGroupAdvisorIds(
+        view.group,
+        context.members,
+        context.students,
+        context.lecturers,
+        data.sourceWorkbooks,
+      ),
+    [
+      view.group,
+      context.members,
+      context.students,
+      context.lecturers,
+      data.sourceWorkbooks,
+    ],
+  );
+
+  const isConflict = Boolean(
+    view.group.graderId && groupAdvisorIds.includes(view.group.graderId),
+  );
 
   return (
     <article className="group-card">
@@ -291,10 +489,20 @@ function GroupCard({
           <p>
             {view.studentCount} sinh viên ·{" "}
             {grader ? (
-              <Badge tone="purple">GV chấm: {grader.displayName}</Badge>
+              <Badge tone={isConflict ? "danger" : "purple"}>
+                {isConflict ? "⛔ Xung đột: " : ""}GV chấm: {grader.displayName}
+              </Badge>
             ) : (
               <Badge tone="warning">Chưa phân công chấm</Badge>
             )}
+            {view.group.defaultAdvisorId ? (
+              <small className="muted" style={{ marginLeft: "8px" }}>
+                · GVHD nhóm:{" "}
+                <strong>
+                  {lecturerById.get(view.group.defaultAdvisorId)?.displayName}
+                </strong>
+              </small>
+            ) : null}
           </p>
         </div>
         <div className="group-header-actions">
@@ -311,11 +519,47 @@ function GroupCard({
               }
             >
               <option value="">— Chưa gán —</option>
-              {activeLecturers.map((lecturer) => (
-                <option key={lecturer.id} value={lecturer.id}>
-                  {lecturer.displayName}
-                </option>
-              ))}
+              {activeLecturers.map((lecturer) => {
+                const isGrader = view.group.graderId === lecturer.id;
+                return (
+                  <option
+                    key={lecturer.id}
+                    value={lecturer.id}
+                    disabled={isGrader}
+                  >
+                    {lecturer.displayName}
+                    {isGrader ? " (Đang là GV chấm)" : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <label className="inline-select">
+            <span>Giảng viên chấm</span>
+            <select
+              value={view.group.graderId ?? ""}
+              onChange={(event) =>
+                onUpdate(
+                  updateGroup(data, view.group.id, {
+                    graderId: event.target.value || null,
+                  }),
+                )
+              }
+            >
+              <option value="">— Chưa phân công —</option>
+              {activeLecturers.map((lecturer) => {
+                const isAdvisor = groupAdvisorIds.includes(lecturer.id);
+                return (
+                  <option
+                    key={lecturer.id}
+                    value={lecturer.id}
+                    disabled={isAdvisor}
+                  >
+                    {lecturer.displayName}
+                    {isAdvisor ? " (⛔ GVHD - Không được chấm)" : ""}
+                  </option>
+                );
+              })}
             </select>
           </label>
           <button
@@ -331,6 +575,12 @@ function GroupCard({
           </button>
         </div>
       </div>
+
+      {isConflict ? (
+        <Notice tone="danger">
+          ⛔ <strong>Xung đột quyền lợi:</strong> Giảng viên chấm ({grader?.displayName}) là GVHD của sinh viên trong nhóm này! Theo quy chế, GVHD không được chấm sinh viên mình hướng dẫn. Vui lòng chọn giảng viên chấm khác.
+        </Notice>
+      ) : null}
 
       {view.sizeWarning ? <Notice tone="warning">{view.sizeWarning}</Notice> : null}
       {view.missingAdvisorCount > 0 ? (
