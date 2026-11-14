@@ -57,7 +57,7 @@ export function GroupsPage({
   const [groupCode, setGroupCode] = useState("");
   const [advisorId, setAdvisorId] = useState("");
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
-  const [mode, setMode] = useState<BalanceMode>("students");
+  const [mode, setMode] = useState<BalanceMode>("groups");
 
   const availableStudents = useMemo(() => getAvailableStudents(context), [context]);
   const availableWithGroup = useMemo(
@@ -360,19 +360,19 @@ export function GroupsPage({
             <input
               type="radio"
               name="balance-mode"
-              checked={mode === "students"}
-              onChange={() => setMode("students")}
+              checked={mode === "groups"}
+              onChange={() => setMode("groups")}
             />
-            <span>Cân bằng theo số sinh viên (mặc định)</span>
+            <span>Cân bằng theo số nhóm (khuyên dùng, chia đều số nhóm cho mỗi GV)</span>
           </label>
           <label className="checkbox-line">
             <input
               type="radio"
               name="balance-mode"
-              checked={mode === "groups"}
-              onChange={() => setMode("groups")}
+              checked={mode === "students"}
+              onChange={() => setMode("students")}
             />
-            <span>Cân bằng theo số nhóm</span>
+            <span>Cân bằng theo số sinh viên</span>
           </label>
           <button type="button" className="button" onClick={handleSuggest}>
             ⚡ Gợi ý phân công tự động

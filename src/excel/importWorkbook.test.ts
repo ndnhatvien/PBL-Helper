@@ -557,30 +557,30 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
     // Mỗi lớp đều có Nhóm 1 và Nhóm 2 -> Tổng cộng phải là 6 nhóm độc lập
     const students = [
       // Bảng điểm 1
-      { mssv: "101", name: "SV 1A", className: "21Nh11", courseCode: "21.11", groupCode: "1", advisorName: "GVHD A", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
-      { mssv: "102", name: "SV 2A", className: "21Nh11", courseCode: "21.11", groupCode: "2", advisorName: "GVHD A", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "101", name: "SV 1A", className: "21Nh11", courseCode: "21.11", courseName: "PBL", groupCode: "1", advisorName: "GVHD A", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "102", name: "SV 2A", className: "21Nh11", courseCode: "21.11", courseName: "PBL", groupCode: "2", advisorName: "GVHD A", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
       // Bảng điểm 2
-      { mssv: "201", name: "SV 1B", className: "21Nh12", courseCode: "21.12", groupCode: "1", advisorName: "GVHD B", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
-      { mssv: "202", name: "SV 2B", className: "21Nh12", courseCode: "21.12", groupCode: "2", advisorName: "GVHD B", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "201", name: "SV 1B", className: "21Nh12", courseCode: "21.12", courseName: "PBL", groupCode: "1", advisorName: "GVHD B", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "202", name: "SV 2B", className: "21Nh12", courseCode: "21.12", courseName: "PBL", groupCode: "2", advisorName: "GVHD B", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
       // Bảng điểm 3
-      { mssv: "301", name: "SV 1C", className: "21Nh13", courseCode: "21.13", groupCode: "1", advisorName: "GVHD C", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
-      { mssv: "302", name: "SV 2C", className: "21Nh13", courseCode: "21.13", groupCode: "2", advisorName: "GVHD C", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "301", name: "SV 1C", className: "21Nh13", courseCode: "21.13", courseName: "PBL", groupCode: "1", advisorName: "GVHD C", sourceRowNumber: 1, errors: [], warnings: [], originalRowData: [] },
+      { mssv: "302", name: "SV 2C", className: "21Nh13", courseCode: "21.13", courseName: "PBL", groupCode: "2", advisorName: "GVHD C", sourceRowNumber: 2, errors: [], warnings: [], originalRowData: [] },
     ];
 
     const wb1: PendingWorkbook = {
       tempId: "p1", fileName: "LHP_21.11.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
       headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
-      rows: students.slice(0, 2), metaCourseCode: "21.11", metaLecturerName: "GVHD A", errors: [], warnings: [],
+      rows: students.slice(0, 2), metaCourseCode: "21.11", metaCourseName: "PBL", metaLecturerName: "GVHD A", errors: [], warnings: [],
     };
     const wb2: PendingWorkbook = {
       tempId: "p2", fileName: "LHP_21.12.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
       headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
-      rows: students.slice(2, 4), metaCourseCode: "21.12", metaLecturerName: "GVHD B", errors: [], warnings: [],
+      rows: students.slice(2, 4), metaCourseCode: "21.12", metaCourseName: "PBL", metaLecturerName: "GVHD B", errors: [], warnings: [],
     };
     const wb3: PendingWorkbook = {
       tempId: "p3", fileName: "LHP_21.13.xlsx", fileSize: 1024, originalBase64: "", sheetNames: ["S1"], sheetName: "S1",
       headerRow: 0, dataStartRow: 1, headers: ["MSSV"], mapping: { mssv: 0, name: null, className: null, courseCode: null, courseName: null, groupCode: null, advisor: null, score: null },
-      rows: students.slice(4, 6), metaCourseCode: "21.13", metaLecturerName: "GVHD C", errors: [], warnings: [],
+      rows: students.slice(4, 6), metaCourseCode: "21.13", metaCourseName: "PBL", metaLecturerName: "GVHD C", errors: [], warnings: [],
     };
 
     const commitRes = commitSourceWorkbooks(data, batch.id, [wb1, wb2, wb3]);

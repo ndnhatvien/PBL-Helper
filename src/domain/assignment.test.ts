@@ -158,4 +158,38 @@ describe("phân công giảng viên chấm", () => {
       expect(w.workbookIds?.length).toBeLessThanOrEqual(2);
     }
   });
+
+  it("mô phỏng thực tế 149 nhóm và 8 giảng viên", () => {
+    const classSizes = [20, 20, 20, 20, 18, 18, 17, 16]; // Tổng = 149 nhóm
+    const lecturers = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"];
+    const groups149: AssignmentGroupInput[] = [];
+
+    classSizes.forEach((size, classIdx) => {
+      const wbId = `wb_${classIdx + 1}`;
+      const advisorId = lecturers[classIdx];
+      for (let i = 1; i <= size; i += 1) {
+        groups149.push({
+          id: `${wbId}_g${i}`,
+          groupCode: `${wbId}-N${i}`,
+          studentCount: (i % 3) + 2, // 2-4 SV mỗi nhóm
+          sourceWorkbookId: wbId,
+          excludedLecturerIds: [advisorId],
+        });
+      }
+    });
+
+    const resultGroups = suggestAssignment(groups149, lecturers, "groups");
+    expect(resultGroups.unassignedGroupIds).toHaveLength(0);
+    const groupCounts = resultGroups.workload.map((w) => w.groupCount);
+    // 149 nhóm / 8 giảng viên: chính xác 5 GV nhận 19 nhóm và 3 GV nhận 18 nhóm
+    expect(Math.max(...groupCounts)).toBe(19);
+    expect(Math.min(...groupCounts)).toBe(18);
+    expect(groupCounts.reduce((a, b) => a + b, 0)).toBe(149);
+
+    const resultStudents = suggestAssignment(groups149, lecturers, "students");
+    expect(resultStudents.unassignedGroupIds).toHaveLength(0);
+    const sGroupCounts = resultStudents.workload.map((w) => w.groupCount);
+    // Chế độ sinh viên vẫn giữ số nhóm cân bằng chặt chẽ
+    expect(Math.max(...sGroupCounts) - Math.min(...sGroupCounts)).toBeLessThanOrEqual(3);
+  });
 });
