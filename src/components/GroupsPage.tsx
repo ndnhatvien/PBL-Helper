@@ -12,6 +12,8 @@ import {
   autoCreateGroupsFromSource,
   createGroup,
   deleteGroup,
+  formatCompoundGroupCode,
+  getWorkbookLabel,
   removeGroupMember,
   resetAndRecreateGroupsFromSource,
   updateGroup,
@@ -58,6 +60,7 @@ export function GroupsPage({
   const [advisorId, setAdvisorId] = useState("");
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [mode, setMode] = useState<BalanceMode>("groups");
+  const [filterWorkbookId, setFilterWorkbookId] = useState<string>("all");
 
   const availableStudents = useMemo(() => getAvailableStudents(context), [context]);
   const availableWithGroup = useMemo(
@@ -75,6 +78,21 @@ export function GroupsPage({
     [context.sourceWorkbooks],
   );
 
+  const displayedGroupViews = useMemo(() => {
+    if (filterWorkbookId === "all") return groupViews;
+    return groupViews.filter((view) => {
+      const wbId =
+        view.group.sourceWorkbookId ||
+        view.members[0]?.student.sourceWorkbookId ||
+        context.students.find((s) =>
+          context.members.some(
+            (m) => m.groupId === view.group.id && m.studentId === s.id,
+          ),
+        )?.sourceWorkbookId;
+      return wbId === filterWorkbookId;
+    });
+  }, [groupViews, filterWorkbookId, context.students, context.members]);
+
   const workload = useMemo(
     () =>
       activeLecturers
@@ -86,6 +104,7 @@ export function GroupsPage({
           const wbMap = new Map<string, { label: string; count: number }>();
           for (const view of groups) {
             const wbId =
+              view.group.sourceWorkbookId ||
               view.members[0]?.student.sourceWorkbookId ||
               context.students.find((s) =>
                 context.members.some(
@@ -93,9 +112,7 @@ export function GroupsPage({
                 ),
               )?.sourceWorkbookId;
             const wb = wbId ? workbookById.get(wbId) : null;
-            const label = wb
-              ? wb.metaCourseCode || wb.fileName.replace(/\.(xlsx|xls)$/i, "")
-              : "Khác";
+            const label = wb ? getWorkbookLabel(wb) : "Khác";
             const key = wbId || "unknown";
             const existing = wbMap.get(key);
             if (existing) {
@@ -157,12 +174,17 @@ export function GroupsPage({
 
   function handleCreateGroup(event: React.FormEvent) {
     event.preventDefault();
+    const firstStu = availableStudents.find((s) => selectedStudentIds.includes(s.id));
+    const wb = firstStu?.sourceWorkbookId ? workbookById.get(firstStu.sourceWorkbookId) : undefined;
+    const finalCode = formatCompoundGroupCode(wb, groupCode);
+
     const result = createGroup(
       data,
       batch!.id,
-      groupCode,
+      finalCode,
       selectedStudentIds,
       advisorId || null,
+      firstStu?.sourceWorkbookId,
     );
     if (result.error) {
       onNotice("danger", result.error);
@@ -172,7 +194,7 @@ export function GroupsPage({
     setGroupCode("");
     setAdvisorId("");
     setSelectedStudentIds([]);
-    onNotice("success", "Đã tạo nhóm PBL.");
+    onNotice("success", `Đã tạo nhóm "${finalCode}".`);
   }
 
   function commitGroupUpdate(result: { data: AppData; error?: string }) {
@@ -237,6 +259,7 @@ export function GroupsPage({
           currentData.sourceWorkbooks,
         ),
         sourceWorkbookId:
+          view.group.sourceWorkbookId ||
           view.members[0]?.student.sourceWorkbookId ||
           currentData.students.find((s) =>
             currentData.members.some(
@@ -593,11 +616,72 @@ export function GroupsPage({
             </button>
           ) : null}
         </div>
+        {context.sourceWorkbooks.length > 1 && groupViews.length > 0 ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
+              margin: "8px 0 16px 0",
+              padding: "10px 14px",
+              background: "var(--surface-sunken)",
+              borderRadius: "8px",
+              border: "1px solid var(--border-soft)",
+            }}
+          >
+            <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>
+              📋 Lọc theo bảng điểm:
+            </span>
+            <select
+              value={filterWorkbookId}
+              onChange={(e) => setFilterWorkbookId(e.target.value)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "1px solid var(--border)",
+                fontSize: "0.88rem",
+                background: "var(--surface)",
+              }}
+            >
+              <option value="all">
+                Tất cả bảng điểm ({groupViews.length} nhóm)
+              </option>
+              {context.sourceWorkbooks.map((w) => {
+                const count = groupViews.filter((v) => {
+                  const wid =
+                    v.group.sourceWorkbookId ||
+                    v.members[0]?.student.sourceWorkbookId;
+                  return wid === w.id;
+                }).length;
+                return (
+                  <option key={w.id} value={w.id}>
+                    {getWorkbookLabel(w)} ({count} nhóm)
+                  </option>
+                );
+              })}
+            </select>
+            {filterWorkbookId !== "all" ? (
+              <button
+                type="button"
+                className="button small ghost"
+                onClick={() => setFilterWorkbookId("all")}
+              >
+                ✕ Xem tất cả
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         {groupViews.length === 0 ? (
           <EmptyState title="Chưa có nhóm PBL">Tạo nhóm ở phía trên.</EmptyState>
+        ) : displayedGroupViews.length === 0 ? (
+          <EmptyState title="Không có nhóm nào thuộc bảng điểm này">
+            Hãy chọn bảng điểm khác hoặc nhấn "Xem tất cả".
+          </EmptyState>
         ) : (
           <div className="group-list">
-            {groupViews.map((view) => (
+            {displayedGroupViews.map((view) => (
               <GroupCard
                 key={view.group.id}
                 view={view}
@@ -663,12 +747,43 @@ function GroupCard({
     view.group.graderId && groupAdvisorIds.includes(view.group.graderId),
   );
 
+  const wbId =
+    view.group.sourceWorkbookId ||
+    view.members[0]?.student.sourceWorkbookId ||
+    context.students.find((s) =>
+      context.members.some(
+        (m) => m.groupId === view.group.id && m.studentId === s.id,
+      ),
+    )?.sourceWorkbookId;
+  const wb = wbId ? workbookById.get(wbId) : null;
+  const wbLabel = wb ? getWorkbookLabel(wb) : "";
+
+  const formattedTitle =
+    view.group.groupCode.toLowerCase().includes("nhóm") ||
+    view.group.groupCode.includes("-")
+      ? view.group.groupCode
+      : `Nhóm ${view.group.groupCode}`;
+
   return (
     <article className="group-card">
       <div className="group-header">
         <div>
-          <h3>Nhóm {view.group.groupCode}</h3>
-          <p>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
+            }}
+          >
+            <h3 style={{ margin: 0 }}>{formattedTitle}</h3>
+            {wbLabel ? (
+              <Badge tone="info">
+                📋 {wbLabel}
+              </Badge>
+            ) : null}
+          </div>
+          <p style={{ marginTop: "4px" }}>
             {view.studentCount} sinh viên ·{" "}
             {grader ? (
               <Badge tone={isConflict ? "danger" : "purple"}>

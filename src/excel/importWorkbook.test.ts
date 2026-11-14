@@ -202,7 +202,8 @@ describe("đọc file Excel mẫu", () => {
 
     const autoGroups = autoCreateGroupsFromSource(committed.data, batch.id);
     expect(autoGroups.createdCount).toBe(1);
-    const createdGroup = autoGroups.data.groups.find((g) => g.groupCode === "N38B_01");
+    const createdGroup = autoGroups.data.groups.find((g) => g.groupCode.includes("N38B_01"));
+    expect(createdGroup?.sourceWorkbookId).toBeDefined();
     const advisor = autoGroups.data.lecturers.find(
       (l) => l.id === createdGroup?.defaultAdvisorId,
     );
@@ -395,8 +396,9 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
     expect(autoResult.createdCount).toBe(1);
     expect(autoResult.skippedCount).toBe(1); // 1 sinh viên thiếu nhóm
 
-    const createdGroup = autoResult.data.groups.find((g) => g.groupCode === "AUTO_01");
+    const createdGroup = autoResult.data.groups.find((g) => g.groupCode.includes("AUTO_01"));
     expect(createdGroup).toBeDefined();
+    expect(createdGroup?.sourceWorkbookId).toBeDefined();
     const members = autoResult.data.members.filter((m) => m.groupId === createdGroup!.id);
     expect(members).toHaveLength(2);
   });

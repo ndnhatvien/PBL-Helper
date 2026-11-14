@@ -79,6 +79,7 @@ export interface PblGroup {
   id: string;
   batchId: string;
   groupCode: string;
+  sourceWorkbookId?: string | null;
   defaultAdvisorId: string | null;
   graderId: string | null;
   createdAt: string;

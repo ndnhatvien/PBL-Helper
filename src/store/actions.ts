@@ -559,12 +559,42 @@ export function commitSourceWorkbooks(
   };
 }
 
+export function getWorkbookLabel(wb?: SourceWorkbook | null): string {
+  if (!wb) return "";
+  const code = wb.metaCourseCode?.trim();
+  if (code) return code;
+  return (
+    wb.fileName
+      .replace(/\.(xlsx|xls)$/i, "")
+      .replace(/[-_]?(DSTS|bang_diem|CK|dsts).*$/i, "")
+      .trim() || wb.fileName.replace(/\.(xlsx|xls)$/i, "").trim()
+  );
+}
+
+export function formatCompoundGroupCode(
+  wb: SourceWorkbook | undefined,
+  rawCode: string,
+): string {
+  const cleanRaw = rawCode.trim();
+  if (!cleanRaw) return "";
+  const isPlainNumber = /^\d+$/.test(cleanRaw);
+  const groupLabel = isPlainNumber ? `Nhóm ${cleanRaw}` : cleanRaw;
+
+  const prefix = wb ? getWorkbookLabel(wb) : "";
+  if (!prefix) return groupLabel;
+  if (groupLabel.toLowerCase().startsWith(prefix.toLowerCase())) {
+    return groupLabel;
+  }
+  return `${prefix} - ${groupLabel}`;
+}
+
 export function createGroup(
   data: AppData,
   batchId: string,
   groupCode: string,
   studentIds: string[],
   defaultAdvisorId: string | null,
+  sourceWorkbookId?: string | null,
 ): ActionResult {
   const code = groupCode.trim();
   if (!code) return { data, error: "Mã nhóm không được để trống." };
@@ -608,11 +638,17 @@ export function createGroup(
     if (!advisor) return { data, error: "GVHD mặc định không hợp lệ." };
   }
 
+  let wbId = sourceWorkbookId ?? null;
+  if (!wbId && studentIds.length > 0) {
+    wbId = batchStudents.get(studentIds[0])?.sourceWorkbookId ?? null;
+  }
+
   const now = nowIso();
   const group: PblGroup = {
     id: createId("grp"),
     batchId,
     groupCode: code,
+    sourceWorkbookId: wbId,
     defaultAdvisorId,
     graderId: null,
     createdAt: now,
@@ -731,16 +767,7 @@ export function autoCreateGroupsFromSource(
       .map((wb) => [wb.id, wb]),
   );
 
-  // Kiểm tra mã nhóm nào xuất hiện ở nhiều hơn 1 bảng điểm (bị trùng mã nhóm nguồn giữa các bảng điểm)
-  const workbooksByRawCode = new Map<string, Set<string>>();
-  for (const s of studentsWithGroup) {
-    const raw = s.groupCodeFromSource.trim().toLowerCase();
-    const set = workbooksByRawCode.get(raw) ?? new Set<string>();
-    set.add(s.sourceWorkbookId);
-    workbooksByRawCode.set(raw, set);
-  }
-
-  // Gom theo cặp (sourceWorkbookId, rawGroupCode) để đảm bảo không bị gộp nhóm giữa các bảng điểm khác nhau
+  // Gom nhóm chuẩn: Mỗi nhóm sinh viên LUÔN LUÔN được xác định bởi Bảng điểm + Tên nhóm nguồn
   const grouped = new Map<
     string,
     {
@@ -759,21 +786,7 @@ export function autoCreateGroupsFromSource(
       existing.students.push(s);
     } else {
       const wb = workbookMap.get(s.sourceWorkbookId);
-      const isColliding = (workbooksByRawCode.get(rawCode.toLowerCase())?.size ?? 0) > 1;
-
-      let prefix = "";
-      if (isColliding && wb) {
-        prefix = (wb.metaCourseCode?.trim() || wb.fileName.replace(/\.(xlsx|xls)$/i, "").trim());
-      }
-
-      // Chuẩn hóa nhãn nhóm: nếu chỉ là số như "1", "01" thì hiển thị "Nhóm 1", "Nhóm 01" khi có trùng
-      const isPlainNumber = /^\d+$/.test(rawCode);
-      const groupLabel = isPlainNumber && isColliding ? `Nhóm ${rawCode}` : rawCode;
-
-      let finalGroupCode = groupLabel;
-      if (prefix && !rawCode.toLowerCase().includes(prefix.toLowerCase())) {
-        finalGroupCode = `${prefix} - ${groupLabel}`;
-      }
+      const finalGroupCode = formatCompoundGroupCode(wb, rawCode);
 
       grouped.set(compoundKey, {
         sourceWorkbookId: s.sourceWorkbookId,
@@ -792,7 +805,9 @@ export function autoCreateGroupsFromSource(
     const existingGroup = nextData.groups.find(
       (g) =>
         g.batchId === batchId &&
-        (g.groupCode.toLowerCase() === finalGroupCode.toLowerCase() ||
+        ((g.sourceWorkbookId === sourceWorkbookId &&
+          g.groupCode.toLowerCase() === finalGroupCode.toLowerCase()) ||
+          g.groupCode.toLowerCase() === finalGroupCode.toLowerCase() ||
           // Hoặc khớp mã nhóm gốc VÀ có thành viên cùng sourceWorkbookId
           (g.groupCode.toLowerCase() === rawCode.toLowerCase() &&
             nextData.members.some((m) => {
@@ -857,6 +872,7 @@ export function autoCreateGroupsFromSource(
         finalGroupCode,
         students.map((s) => s.id),
         defaultAdvisorId,
+        sourceWorkbookId,
       );
       if (!createResult.error) {
         nextData = createResult.data;
@@ -923,7 +939,12 @@ export function resetAndRecreateGroupsFromSource(
 export function updateGroup(
   data: AppData,
   groupId: string,
-  patch: Partial<Pick<PblGroup, "groupCode" | "defaultAdvisorId" | "graderId">>,
+  patch: Partial<
+    Pick<
+      PblGroup,
+      "groupCode" | "defaultAdvisorId" | "graderId" | "sourceWorkbookId"
+    >
+  >,
 ): ActionResult {
   const group = data.groups.find((item) => item.id === groupId);
   if (!group) return { data, error: "Không tìm thấy nhóm." };
