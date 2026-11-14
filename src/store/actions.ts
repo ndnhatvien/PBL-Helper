@@ -18,6 +18,7 @@ import {
   findCrossFileDuplicateIssues,
   splitLecturerNames,
 } from "../excel/importWorkbook";
+export { splitLecturerNames };
 import { createId, nowIso } from "../utils/id";
 
 export interface ActionResult {
@@ -86,6 +87,293 @@ export function updateLecturer(
     lecturers: data.lecturers.map((lecturer) =>
       lecturer.id === lecturerId ? { ...lecturer, ...patch } : lecturer,
     ),
+  };
+}
+
+export function renameLecturer(
+  data: AppData,
+  batchId: string,
+  lecturerId: string,
+  newDisplayName: string,
+): ActionResult {
+  const trimmed = newDisplayName.trim();
+  if (!trimmed) {
+    return { data, error: "Tên giảng viên không được để trống." };
+  }
+
+  const lecturer = data.lecturers.find((l) => l.id === lecturerId);
+  if (!lecturer) {
+    return { data, error: "Không tìm thấy giảng viên." };
+  }
+
+  const existingOther = data.lecturers.find(
+    (l) =>
+      l.batchId === batchId &&
+      l.id !== lecturerId &&
+      l.displayName.trim().toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (existingOther) {
+    return { data, error: `Đã có giảng viên "${existingOther.displayName}" trong đợt.` };
+  }
+
+  const oldName = lecturer.displayName.trim();
+  const oldLower = oldName.toLowerCase();
+  const newName = trimmed;
+
+  const nextLecturers = data.lecturers.map((l) =>
+    l.id === lecturerId ? { ...l, displayName: newName } : l,
+  );
+
+  // Sync to source workbooks
+  const nextWorkbooks = data.sourceWorkbooks.map((wb) => {
+    if (wb.batchId !== batchId) return wb;
+    let changed = false;
+    const currentNames = wb.metaLecturerNames?.length
+      ? wb.metaLecturerNames
+      : wb.metaLecturerName
+        ? splitLecturerNames(wb.metaLecturerName)
+        : [];
+    const nextNames = currentNames.map((n) => {
+      if (n.trim().toLowerCase() === oldLower) {
+        changed = true;
+        return newName;
+      }
+      return n;
+    });
+
+    if (!changed) return wb;
+    return {
+      ...wb,
+      metaLecturerNames: nextNames,
+      metaLecturerName: nextNames.join(", "),
+    };
+  });
+
+  // Sync to students advisorNameFromSource
+  const nextStudents = data.students.map((st) => {
+    if (st.batchId !== batchId) return st;
+    if (st.advisorNameFromSource?.trim().toLowerCase() === oldLower) {
+      return { ...st, advisorNameFromSource: newName };
+    }
+    return st;
+  });
+
+  return {
+    data: {
+      ...data,
+      lecturers: nextLecturers,
+      sourceWorkbooks: nextWorkbooks,
+      students: nextStudents,
+    },
+  };
+}
+
+export function deleteLecturer(
+  data: AppData,
+  batchId: string,
+  lecturerId: string,
+): ActionResult {
+  const lecturer = data.lecturers.find((l) => l.id === lecturerId);
+  if (!lecturer) {
+    return { data, error: "Không tìm thấy giảng viên." };
+  }
+
+  const advisorGroups = data.groups.filter(
+    (g) => g.batchId === batchId && g.defaultAdvisorId === lecturerId,
+  ).length;
+  const graderGroups = data.groups.filter(
+    (g) => g.batchId === batchId && g.graderId === lecturerId,
+  ).length;
+  const overrides = data.members.filter(
+    (m) => m.advisorOverrideId === lecturerId,
+  ).length;
+
+  const inWorkbooks = data.sourceWorkbooks.some((wb) => {
+    if (wb.batchId !== batchId) return false;
+    const names = (
+      wb.metaLecturerNames?.length
+        ? wb.metaLecturerNames
+        : wb.metaLecturerName
+          ? splitLecturerNames(wb.metaLecturerName)
+          : []
+    ).map((n) => n.trim().toLowerCase());
+    return names.includes(lecturer.displayName.trim().toLowerCase());
+  });
+
+  if (advisorGroups > 0 || graderGroups > 0 || overrides > 0 || inWorkbooks) {
+    return {
+      data,
+      error: `Không thể xóa giảng viên "${lecturer.displayName}" vì đang được sử dụng (${advisorGroups} nhóm GVHD, ${graderGroups} nhóm chấm, ${overrides} ngoại lệ${inWorkbooks ? ", có trong file nguồn" : ""}). Hãy gỡ phân công trước.`,
+    };
+  }
+
+  return {
+    data: {
+      ...data,
+      lecturers: data.lecturers.filter((l) => l.id !== lecturerId),
+    },
+  };
+}
+
+export function updateSourceWorkbookAdvisors(
+  data: AppData,
+  batchId: string,
+  workbookId: string,
+  advisors: string[],
+): ActionResult {
+  const wb = data.sourceWorkbooks.find((w) => w.id === workbookId);
+  if (!wb) {
+    return { data, error: "Không tìm thấy file nguồn." };
+  }
+
+  const cleaned = advisors.map((a) => a.trim()).filter(Boolean);
+  if (cleaned.length === 0) {
+    return { data, error: "Cần ít nhất một GVHD cho file." };
+  }
+
+  const existingLecturers = data.lecturers.filter((l) => l.batchId === batchId);
+  const existingNames = new Set(
+    existingLecturers.map((l) => l.displayName.trim().toLowerCase()),
+  );
+
+  const newLecturers: Lecturer[] = [];
+  for (const name of cleaned) {
+    if (!existingNames.has(name.toLowerCase())) {
+      existingNames.add(name.toLowerCase());
+      newLecturers.push({
+        id: createId("lec"),
+        batchId,
+        displayName: name,
+        email: "",
+        active: true,
+        room: "",
+      });
+    }
+  }
+
+  const allLecturers = [...data.lecturers, ...newLecturers];
+  const primaryLec = allLecturers.find(
+    (l) =>
+      l.batchId === batchId &&
+      l.displayName.trim().toLowerCase() === cleaned[0].toLowerCase(),
+  );
+
+  const oldNames = (
+    wb.metaLecturerNames?.length
+      ? wb.metaLecturerNames
+      : wb.metaLecturerName
+        ? splitLecturerNames(wb.metaLecturerName)
+        : []
+  ).map((n) => n.trim().toLowerCase());
+
+  const oldLecIds = new Set(
+    existingLecturers
+      .filter((l) => oldNames.includes(l.displayName.trim().toLowerCase()))
+      .map((l) => l.id),
+  );
+
+  const updatedWorkbooks = data.sourceWorkbooks.map((w) => {
+    if (w.id !== workbookId) return w;
+    return {
+      ...w,
+      metaLecturerNames: cleaned,
+      metaLecturerName: cleaned.join(", "),
+    };
+  });
+
+  const wbStudentIds = new Set(
+    data.students
+      .filter((s) => s.sourceWorkbookId === workbookId)
+      .map((s) => s.id),
+  );
+
+  const affectedGroupIds = new Set(
+    data.members
+      .filter((m) => wbStudentIds.has(m.studentId))
+      .map((m) => m.groupId),
+  );
+
+  const newAdvisorIds = new Set(
+    allLecturers
+      .filter((l) =>
+        l.batchId === batchId &&
+        cleaned.some((c) => c.toLowerCase() === l.displayName.trim().toLowerCase()),
+      )
+      .map((l) => l.id),
+  );
+
+  const updatedGroups = data.groups.map((g) => {
+    if (!affectedGroupIds.has(g.id)) return g;
+    let nextDefaultAdvisorId = g.defaultAdvisorId;
+    if (!g.defaultAdvisorId || oldLecIds.has(g.defaultAdvisorId)) {
+      nextDefaultAdvisorId = primaryLec ? primaryLec.id : g.defaultAdvisorId;
+    }
+    let nextGraderId = g.graderId;
+    if (nextGraderId && newAdvisorIds.has(nextGraderId)) {
+      nextGraderId = null;
+    }
+    return {
+      ...g,
+      defaultAdvisorId: nextDefaultAdvisorId,
+      graderId: nextGraderId,
+    };
+  });
+
+  return {
+    data: {
+      ...data,
+      lecturers: allLecturers,
+      sourceWorkbooks: updatedWorkbooks,
+      groups: updatedGroups,
+    },
+  };
+}
+
+export function deleteSourceWorkbook(
+  data: AppData,
+  workbookId: string,
+): ActionResult {
+  const wb = data.sourceWorkbooks.find((w) => w.id === workbookId);
+  if (!wb) {
+    return { data, error: "Không tìm thấy file nguồn." };
+  }
+
+  const studentIdsToDelete = new Set(
+    data.students
+      .filter((s) => s.sourceWorkbookId === workbookId)
+      .map((s) => s.id),
+  );
+
+  const remainingStudents = data.students.filter(
+    (s) => !studentIdsToDelete.has(s.id),
+  );
+  const remainingMembers = data.members.filter(
+    (m) => !studentIdsToDelete.has(m.studentId),
+  );
+
+  const activeGroupIds = new Set(remainingMembers.map((m) => m.groupId));
+  const remainingGroups = data.groups.filter((g) => {
+    if (g.batchId !== wb.batchId) return true;
+    return activeGroupIds.has(g.id);
+  });
+
+  const remainingReviews = data.reviews.filter(
+    (r) => !studentIdsToDelete.has(r.studentId),
+  );
+
+  const remainingWorkbooks = data.sourceWorkbooks.filter(
+    (w) => w.id !== workbookId,
+  );
+
+  return {
+    data: {
+      ...data,
+      students: remainingStudents,
+      members: remainingMembers,
+      groups: remainingGroups,
+      reviews: remainingReviews,
+      sourceWorkbooks: remainingWorkbooks,
+    },
   };
 }
 

@@ -10,7 +10,15 @@ import {
   pendingHasBlockingErrors,
 } from "./importWorkbook";
 import { buildFinalExports } from "./finalExport";
-import { addBatch, autoCreateGroupsFromSource, commitSourceWorkbooks } from "../store/actions";
+import {
+  addBatch,
+  autoCreateGroupsFromSource,
+  commitSourceWorkbooks,
+  deleteLecturer,
+  deleteSourceWorkbook,
+  renameLecturer,
+  updateSourceWorkbookAdvisors,
+} from "../store/actions";
 import { createEmptyData } from "../store/store";
 import { buildScenario } from "../test/scenario";
 import { arrayBufferToBase64 } from "../utils/base64";
@@ -461,5 +469,82 @@ describe("đọc nhiều file và phát hiện trùng MSSV", () => {
     expect(lecturerNames).toContain("ThS. Nguyễn Văn A");
     expect(lecturerNames).toContain("TS. Lê Thị B");
     expect(lecturerNames).not.toContain("");
+  });
+
+  it("sửa GVHD của file nguồn đã nhập (updateSourceWorkbookAdvisors)", () => {
+    const scenario = buildScenario();
+    const wb = scenario.data.sourceWorkbooks[0];
+    expect(wb).toBeDefined();
+
+    // Sửa GVHD thành GVHD mới và thêm GVHD đồng hướng dẫn
+    const updated = updateSourceWorkbookAdvisors(scenario.data, scenario.batch.id, wb.id, [
+      "TS. Giảng Viên Mới",
+      "ThS. Đồng Hướng Dẫn",
+    ]);
+
+    expect(updated.error).toBeUndefined();
+    const targetWb = updated.data.sourceWorkbooks.find((w) => w.id === wb.id);
+    expect(targetWb?.metaLecturerNames).toEqual(["TS. Giảng Viên Mới", "ThS. Đồng Hướng Dẫn"]);
+    expect(targetWb?.metaLecturerName).toBe("TS. Giảng Viên Mới, ThS. Đồng Hướng Dẫn");
+
+    // Giảng viên mới tự động được tạo trong đợt
+    const lecNames = updated.data.lecturers.map((l) => l.displayName);
+    expect(lecNames).toContain("TS. Giảng Viên Mới");
+    expect(lecNames).toContain("ThS. Đồng Hướng Dẫn");
+  });
+
+  it("đổi tên giảng viên (renameLecturer) và đồng bộ sang file nguồn", () => {
+    const scenario = buildScenario();
+    const lecturer = scenario.data.lecturers[0];
+    expect(lecturer).toBeDefined();
+
+    const oldName = lecturer.displayName;
+    const renamed = renameLecturer(scenario.data, scenario.batch.id, lecturer.id, "TS. Tên Sau Khi Sửa");
+    expect(renamed.error).toBeUndefined();
+
+    const updatedLec = renamed.data.lecturers.find((l) => l.id === lecturer.id);
+    expect(updatedLec?.displayName).toBe("TS. Tên Sau Khi Sửa");
+
+    // File nguồn có chứa tên cũ được cập nhật sang tên mới
+    for (const wb of renamed.data.sourceWorkbooks) {
+      if (wb.metaLecturerNames?.includes(oldName)) {
+        throw new Error("File nguồn vẫn còn tên cũ");
+      }
+    }
+  });
+
+  it("xóa file nguồn đã nhập và dọn sạch sinh viên liên quan (deleteSourceWorkbook)", () => {
+    const scenario = buildScenario();
+    const wb = scenario.data.sourceWorkbooks[0];
+    expect(wb).toBeDefined();
+
+    const deleted = deleteSourceWorkbook(scenario.data, wb.id);
+    expect(deleted.error).toBeUndefined();
+    expect(deleted.data.sourceWorkbooks.find((w) => w.id === wb.id)).toBeUndefined();
+
+    // Không còn sinh viên nào thuộc workbook bị xóa
+    const studentsInDeleted = deleted.data.students.filter((s) => s.sourceWorkbookId === wb.id);
+    expect(studentsInDeleted).toHaveLength(0);
+  });
+
+  it("xóa giảng viên chưa phân công (deleteLecturer)", () => {
+    const scenario = buildScenario();
+    // Tạo 1 giảng viên mới chưa gắn với nhóm hay file nào
+    const newLec = {
+      id: "lec_test_unused",
+      batchId: scenario.batch.id,
+      displayName: "TS. Chưa Phân Công",
+      email: "",
+      active: true,
+      room: "",
+    };
+    const dataWithLec = {
+      ...scenario.data,
+      lecturers: [...scenario.data.lecturers, newLec],
+    };
+
+    const deleted = deleteLecturer(dataWithLec, scenario.batch.id, "lec_test_unused");
+    expect(deleted.error).toBeUndefined();
+    expect(deleted.data.lecturers.find((l) => l.id === "lec_test_unused")).toBeUndefined();
   });
 });

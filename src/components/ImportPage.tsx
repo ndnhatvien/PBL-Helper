@@ -1,7 +1,12 @@
 import { useMemo, useState } from "react";
-import type { ColumnMapping, ExamBatch, PendingWorkbook } from "../types";
+import type { ColumnMapping, ExamBatch, PendingWorkbook, SourceWorkbook } from "../types";
 import type { AppData } from "../store/store";
-import { commitSourceWorkbooks } from "../store/actions";
+import {
+  commitSourceWorkbooks,
+  deleteSourceWorkbook,
+  splitLecturerNames,
+  updateSourceWorkbookAdvisors,
+} from "../store/actions";
 import {
   analyzeFile,
   analyzeWorkbook,
@@ -59,6 +64,8 @@ export function ImportPage({
   const [pending, setPending] = useState<PendingWorkbook[]>([]);
   const [loading, setLoading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [editingWorkbook, setEditingWorkbook] = useState<SourceWorkbook | null>(null);
+  const [editingAdvisors, setEditingAdvisors] = useState<string[]>([""]);
 
   const existingStudents = useMemo(
     () => data.students.filter((student) => student.batchId === batch?.id),
@@ -205,6 +212,49 @@ export function ImportPage({
       "success",
       `Đã nhập ${pending.length} file và ${pending.reduce((total, item) => total + item.rows.length, 0)} sinh viên vào đợt.`,
     );
+  }
+
+  function startEditWorkbook(wb: SourceWorkbook) {
+    const list = wb.metaLecturerNames?.length
+      ? [...wb.metaLecturerNames]
+      : wb.metaLecturerName
+        ? splitLecturerNames(wb.metaLecturerName)
+        : [""];
+    setEditingWorkbook(wb);
+    setEditingAdvisors(list.length > 0 ? list : [""]);
+  }
+
+  function handleSaveWorkbookAdvisors() {
+    if (!editingWorkbook || !batch) return;
+    const result = updateSourceWorkbookAdvisors(
+      data,
+      batch.id,
+      editingWorkbook.id,
+      editingAdvisors,
+    );
+    if (result.error) {
+      onNotice("danger", result.error);
+      return;
+    }
+    setData(result.data);
+    onNotice("success", `Đã cập nhật GVHD cho file "${editingWorkbook.fileName}".`);
+    setEditingWorkbook(null);
+  }
+
+  function handleDeleteWorkbook(wb: SourceWorkbook) {
+    if (!batch) return;
+    const count = data.students.filter((s) => s.sourceWorkbookId === wb.id).length;
+    const ok = window.confirm(
+      `Bạn có chắc chắn muốn xóa file "${wb.fileName}" khỏi đợt?\n\nThao tác này sẽ xóa ${count} sinh viên thuộc file này cùng các phân nhóm tương ứng.`,
+    );
+    if (!ok) return;
+    const result = deleteSourceWorkbook(data, wb.id);
+    if (result.error) {
+      onNotice("danger", result.error);
+      return;
+    }
+    setData(result.data);
+    onNotice("success", `Đã xóa file "${wb.fileName}".`);
   }
 
   if (!batch) {
@@ -367,17 +417,20 @@ export function ImportPage({
                 <tr>
                   <th>File</th>
                   <th>Mẫu / Học phần</th>
-                  <th>Giảng viên</th>
+                  <th>Giảng viên hướng dẫn (GVHD)</th>
                   <th>Sheet</th>
                   <th>Sinh viên</th>
                   <th>Header</th>
                   <th>Nhập lúc</th>
+                  <th>Thao tác</th>
                 </tr>
               </thead>
               <tbody>
                 {sourceWorkbooks.map((workbook) => (
                   <tr key={workbook.id}>
-                    <td>{workbook.fileName}</td>
+                    <td>
+                      <strong>{workbook.fileName}</strong>
+                    </td>
                     <td>
                       {workbook.sourceTemplate === "dsts" ? (
                         <Badge tone="purple">DSTS</Badge>
@@ -388,7 +441,16 @@ export function ImportPage({
                       )}{" "}
                       <small className="muted">{workbook.metaCourseCode || ""}</small>
                     </td>
-                    <td>{workbook.metaLecturerName || "—"}</td>
+                    <td>
+                      <div>
+                        <strong>{workbook.metaLecturerName || "—"}</strong>
+                        {workbook.metaLecturerNames && workbook.metaLecturerNames.length > 1 ? (
+                          <small style={{ display: "block", color: "var(--teal)" }}>
+                            (Đồng hướng dẫn: {workbook.metaLecturerNames.join(" & ")})
+                          </small>
+                        ) : null}
+                      </div>
+                    </td>
                     <td>{workbook.sheetName}</td>
                     <td>
                       {
@@ -399,6 +461,27 @@ export function ImportPage({
                     </td>
                     <td>Dòng {workbook.headerRow + 1}</td>
                     <td>{new Date(workbook.importedAt).toLocaleString("vi-VN")}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          type="button"
+                          className="button small secondary"
+                          title="Sửa GVHD của file nếu nhập sai hoặc thiếu GVHD đồng hướng dẫn"
+                          onClick={() => startEditWorkbook(workbook)}
+                        >
+                          ✏️ Sửa GVHD
+                        </button>
+                        <button
+                          type="button"
+                          className="button small ghost"
+                          style={{ color: "var(--red)" }}
+                          title="Xóa file này khỏi đợt"
+                          onClick={() => handleDeleteWorkbook(workbook)}
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -406,6 +489,174 @@ export function ImportPage({
           </div>
         )}
       </section>
+
+      {/* Datalist gợi ý tên giảng viên có sẵn trong đợt */}
+      <datalist id="batch-lecturer-suggestions">
+        {data.lecturers
+          .filter((l) => l.batchId === batch?.id)
+          .map((l) => (
+            <option key={l.id} value={l.displayName} />
+          ))}
+      </datalist>
+
+      {/* Modal sửa GVHD cho file nguồn đã nhập */}
+      {editingWorkbook ? (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(16, 42, 67, 0.45)",
+            backdropFilter: "blur(3px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            padding: "20px",
+          }}
+          onClick={() => setEditingWorkbook(null)}
+        >
+          <div
+            style={{
+              background: "#ffffff",
+              borderRadius: "14px",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.2)",
+              maxWidth: "600px",
+              width: "100%",
+              padding: "24px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                marginBottom: "16px",
+              }}
+            >
+              <div>
+                <h3 style={{ margin: "0 0 4px 0" }}>✏️ Sửa GVHD file đã nhập</h3>
+                <p className="muted" style={{ margin: 0 }}>
+                  File: <strong>{editingWorkbook.fileName}</strong> (
+                  {
+                    data.students.filter(
+                      (s) => s.sourceWorkbookId === editingWorkbook.id,
+                    ).length
+                  }{" "}
+                  sinh viên)
+                </p>
+              </div>
+              <button
+                type="button"
+                className="button small ghost"
+                onClick={() => setEditingWorkbook(null)}
+                title="Đóng"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div
+              style={{
+                background: "var(--teal-soft)",
+                padding: "10px 14px",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                fontSize: "0.88rem",
+                color: "var(--teal)",
+                border: "1px solid rgba(15, 118, 110, 0.2)",
+              }}
+            >
+              💡 Hệ thống hỗ trợ 1 hoặc 2 GVHD (đồng hướng dẫn). Nếu tên mới chưa có trong đợt, hệ thống sẽ tự động thêm vào danh sách giảng viên và cập nhật phân nhóm liên quan.
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+                marginBottom: "20px",
+              }}
+            >
+              {editingAdvisors.map((adv, idx) => (
+                <label className="field" key={idx} style={{ margin: 0 }}>
+                  <span>
+                    {idx === 0
+                      ? "GVHD chính (GVHD 1) *"
+                      : `GVHD đồng hướng dẫn (GVHD ${idx + 1})`}
+                  </span>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <input
+                      type="text"
+                      list="batch-lecturer-suggestions"
+                      value={adv}
+                      placeholder={`Nhập hoặc chọn tên GVHD ${idx + 1}...`}
+                      onChange={(e) => {
+                        const next = [...editingAdvisors];
+                        next[idx] = e.target.value;
+                        setEditingAdvisors(next);
+                      }}
+                    />
+                    {idx > 0 ? (
+                      <button
+                        type="button"
+                        className="button small ghost"
+                        title="Xóa GVHD đồng hướng dẫn này"
+                        onClick={() => {
+                          const next = editingAdvisors.filter((_, i) => i !== idx);
+                          setEditingAdvisors(next.length > 0 ? next : [""]);
+                        }}
+                      >
+                        ✕
+                      </button>
+                    ) : null}
+                  </div>
+                </label>
+              ))}
+
+              {editingAdvisors.length < 2 ? (
+                <div>
+                  <button
+                    type="button"
+                    className="button small secondary"
+                    onClick={() =>
+                      setEditingAdvisors([...editingAdvisors, ""])
+                    }
+                  >
+                    + Thêm GVHD đồng hướng dẫn
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "10px",
+              }}
+            >
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setEditingWorkbook(null)}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={handleSaveWorkbookAdvisors}
+              >
+                Lưu thay đổi
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <LecturersPanel
         data={data}
@@ -636,6 +887,7 @@ function PendingWorkbookCard({
               <div style={{ display: "flex", gap: "6px" }}>
                 <input
                   type="text"
+                  list="batch-lecturer-suggestions"
                   value={adv}
                   placeholder={`Nhập tên GVHD ${idx + 1}...`}
                   onChange={(e) => handleAdvisorChange(idx, e.target.value)}

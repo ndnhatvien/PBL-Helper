@@ -1,7 +1,12 @@
 import { useState } from "react";
 import type { AppData } from "../store/store";
-import type { ExamBatch } from "../types";
-import { addLecturer, updateLecturer } from "../store/actions";
+import type { ExamBatch, Lecturer } from "../types";
+import {
+  addLecturer,
+  deleteLecturer,
+  renameLecturer,
+  updateLecturer,
+} from "../store/actions";
 import { Badge, EditableRoomCell, EmptyState } from "./shared";
 
 export function LecturersPanel({
@@ -18,6 +23,9 @@ export function LecturersPanel({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [room, setRoom] = useState("");
+  const [editingLecturerId, setEditingLecturerId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+
   const lecturers = data.lecturers.filter((lecturer) => lecturer.batchId === batch.id);
 
   function handleAdd(event: React.FormEvent) {
@@ -32,6 +40,36 @@ export function LecturersPanel({
     setEmail("");
     setRoom("");
     onNotice("success", "Đã thêm giảng viên vào đợt.");
+  }
+
+  function handleStartRename(lecturer: Lecturer) {
+    setEditingLecturerId(lecturer.id);
+    setEditingName(lecturer.displayName);
+  }
+
+  function handleSaveRename(lecturerId: string) {
+    const res = renameLecturer(data, batch.id, lecturerId, editingName);
+    if (res.error) {
+      onNotice("danger", res.error);
+      return;
+    }
+    onDataChange(res.data);
+    setEditingLecturerId(null);
+    onNotice("success", `Đã đổi tên giảng viên thành "${editingName.trim()}".`);
+  }
+
+  function handleDelete(lecturer: Lecturer) {
+    const ok = window.confirm(
+      `Bạn có chắc muốn xóa giảng viên "${lecturer.displayName}" khỏi đợt?`,
+    );
+    if (!ok) return;
+    const res = deleteLecturer(data, batch.id, lecturer.id);
+    if (res.error) {
+      onNotice("danger", res.error);
+      return;
+    }
+    onDataChange(res.data);
+    onNotice("success", `Đã xóa giảng viên "${lecturer.displayName}".`);
   }
 
   return (
@@ -61,7 +99,7 @@ export function LecturersPanel({
                 <th>Phòng chấm</th>
                 <th>Vai trò đang gán</th>
                 <th>Trạng thái</th>
-                <th />
+                <th>Thao tác</th>
               </tr>
             </thead>
             <tbody>
@@ -78,9 +116,73 @@ export function LecturersPanel({
                   (group) =>
                     group.batchId === batch.id && group.graderId === lecturer.id,
                 ).length;
+                const isUnassigned =
+                  advisorGroups === 0 && overrides === 0 && graderGroups === 0;
+
                 return (
                   <tr key={lecturer.id}>
-                    <td>{lecturer.displayName}</td>
+                    <td>
+                      {editingLecturerId === lecturer.id ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                          }}
+                        >
+                          <input
+                            type="text"
+                            className="cell-input"
+                            style={{ maxWidth: "200px" }}
+                            value={editingName}
+                            autoFocus
+                            placeholder="Nhập tên mới..."
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleSaveRename(lecturer.id);
+                              if (e.key === "Escape") setEditingLecturerId(null);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="button small"
+                            style={{ padding: "4px 8px" }}
+                            title="Lưu tên giảng viên"
+                            onClick={() => handleSaveRename(lecturer.id)}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            type="button"
+                            className="button small ghost"
+                            style={{ padding: "4px 8px" }}
+                            title="Hủy"
+                            onClick={() => setEditingLecturerId(null)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <strong>{lecturer.displayName}</strong>
+                          <button
+                            type="button"
+                            className="button small ghost"
+                            style={{ padding: "2px 6px", fontSize: "0.75rem" }}
+                            title="Sửa tên giảng viên nếu nhập sai"
+                            onClick={() => handleStartRename(lecturer)}
+                          >
+                            ✏️ Sửa
+                          </button>
+                        </div>
+                      )}
+                    </td>
                     <td>{lecturer.email || "—"}</td>
                     <td>
                       <EditableRoomCell
@@ -105,9 +207,7 @@ export function LecturersPanel({
                       {graderGroups > 0 ? (
                         <Badge tone="purple">Chấm {graderGroups} nhóm</Badge>
                       ) : null}
-                      {advisorGroups === 0 && overrides === 0 && graderGroups === 0
-                        ? "Chưa gán"
-                        : null}
+                      {isUnassigned ? "Chưa gán" : null}
                     </td>
                     <td>
                       <Badge tone={lecturer.active ? "success" : "neutral"}>
@@ -115,19 +215,32 @@ export function LecturersPanel({
                       </Badge>
                     </td>
                     <td>
-                      <button
-                        type="button"
-                        className="button small ghost"
-                        onClick={() =>
-                          onDataChange(
-                            updateLecturer(data, lecturer.id, {
-                              active: !lecturer.active,
-                            }),
-                          )
-                        }
-                      >
-                        {lecturer.active ? "Tạm ẩn" : "Kích hoạt"}
-                      </button>
+                      <div style={{ display: "flex", gap: "6px" }}>
+                        <button
+                          type="button"
+                          className="button small ghost"
+                          onClick={() =>
+                            onDataChange(
+                              updateLecturer(data, lecturer.id, {
+                                active: !lecturer.active,
+                              }),
+                            )
+                          }
+                        >
+                          {lecturer.active ? "Tạm ẩn" : "Kích hoạt"}
+                        </button>
+                        {isUnassigned ? (
+                          <button
+                            type="button"
+                            className="button small ghost"
+                            style={{ color: "var(--red)" }}
+                            title="Xóa giảng viên chưa phân công (phòng khi tạo nhầm)"
+                            onClick={() => handleDelete(lecturer)}
+                          >
+                            🗑️
+                          </button>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 );
