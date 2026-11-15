@@ -33,6 +33,65 @@ export function canAdvisorReviewStudent(
   );
 }
 
+/**
+ * Lấy tên hiển thị Giảng viên hướng dẫn của sinh viên (hỗ trợ cả đồng hướng dẫn từ file nguồn).
+ * Ưu tiên:
+ * 1. GVHD override riêng của sinh viên.
+ * 2. Đồng hướng dẫn từ file nguồn (sourceWorkbook: metaLecturerNames).
+ * 3. GVHD mặc định của nhóm (defaultAdvisorId).
+ * 4. GVHD theo sinh viên từ file nguồn (advisorNameFromSource).
+ */
+export function getStudentAdvisorDisplayName(
+  member: GroupMember,
+  student: Student,
+  group: PblGroup,
+  lecturers: Lecturer[],
+  sourceWorkbooks?: SourceWorkbook[],
+): string {
+  const lecturerById = new Map(lecturers.map((l) => [l.id, l.displayName]));
+  const lecturerByName = new Map(
+    lecturers.map((l) => [l.displayName.trim().toLowerCase(), l.displayName]),
+  );
+
+  // 1. Override riêng của sinh viên
+  if (member.advisorOverrideId) {
+    const overrideName = lecturerById.get(member.advisorOverrideId);
+    if (overrideName) return overrideName;
+  }
+
+  // 2. Đồng hướng dẫn từ file nguồn
+  const wbId = student.sourceWorkbookId || group.sourceWorkbookId;
+  if (wbId && sourceWorkbooks) {
+    const wb = sourceWorkbooks.find((w) => w.id === wbId);
+    if (wb) {
+      const names = wb.metaLecturerNames?.length
+        ? wb.metaLecturerNames
+        : wb.metaLecturerName
+          ? [wb.metaLecturerName]
+          : [];
+      if (names.length > 0) {
+        const displayNames = names.map(
+          (name) => lecturerByName.get(name.trim().toLowerCase()) || name.trim(),
+        );
+        return displayNames.join(" & ");
+      }
+    }
+  }
+
+  // 3. GVHD mặc định của nhóm
+  if (group.defaultAdvisorId) {
+    const defaultName = lecturerById.get(group.defaultAdvisorId);
+    if (defaultName) return defaultName;
+  }
+
+  // 4. GVHD theo sinh viên từ file nguồn
+  if (student.advisorNameFromSource) {
+    return student.advisorNameFromSource.trim();
+  }
+
+  return "—";
+}
+
 /** Lấy trạng thái rà soát hiện hành theo từng sinh viên + người rà soát. */
 export function findReview<T extends { studentId: string; reviewerId: string }>(
   reviews: T[],

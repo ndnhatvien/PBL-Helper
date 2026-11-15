@@ -4,6 +4,7 @@ import {
   findReview,
   getAdvisorSource,
   getEffectiveAdvisorId,
+  getStudentAdvisorDisplayName,
   reviewStatusForStudent,
 } from "./advisor";
 
@@ -67,5 +68,50 @@ describe("quyền rà soát tách biệt quyền xem", () => {
     ];
     expect(reviewStatusForStudent(reviews, "sv1", "gv-a")).toBe("approved");
     expect(reviewStatusForStudent(reviews, "sv2", "gv-a")).toBe("pending");
+  });
+});
+
+describe("getStudentAdvisorDisplayName", () => {
+  const lecturers = [
+    { id: "l1", batchId: "b1", displayName: "Huỳnh Thanh Tùng", email: "", active: true, createdAt: "", updatedAt: "" },
+    { id: "l2", batchId: "b1", displayName: "Trần Văn Thanh", email: "", active: true, createdAt: "", updatedAt: "" },
+    { id: "l3", batchId: "b1", displayName: "Nguyễn Văn Nam", email: "", active: true, createdAt: "", updatedAt: "" },
+  ];
+
+  it("hiển thị đồng hướng dẫn từ file nguồn", () => {
+    const member = { id: "m1", groupId: "g1", studentId: "s1", advisorOverrideId: null, createdAt: "", updatedAt: "" };
+    const student = { id: "s1", batchId: "b1", mssv: "101", name: "SV A", className: "", courseCode: "", courseName: "", groupCodeFromSource: "N01", advisorNameFromSource: "", sourceWorkbookId: "wb1", sourceRowNumber: 1, errors: [], warnings: [], createdAt: "", updatedAt: "" } as any;
+    const group = { id: "g1", batchId: "b1", groupCode: "T.Tung_T.Thanh_40_N01", defaultAdvisorId: "l1", graderId: null, sourceWorkbookId: "wb1", createdAt: "", updatedAt: "" };
+    const workbooks = [
+      {
+        id: "wb1",
+        batchId: "b1",
+        fileName: "wb1.xlsx",
+        importedAt: "",
+        groupPrefix: "T.Tung_T.Thanh_40",
+        metaLecturerNames: ["Huỳnh Thanh Tùng", "Trần Văn Thanh"],
+        metaLecturerName: "Huỳnh Thanh Tùng, Trần Văn Thanh",
+      } as any,
+    ];
+
+    expect(getStudentAdvisorDisplayName(member, student, group, lecturers, workbooks)).toBe("Huỳnh Thanh Tùng & Trần Văn Thanh");
+  });
+
+  it("ưu tiên GVHD override riêng của sinh viên", () => {
+    const member = { id: "m1", groupId: "g1", studentId: "s1", advisorOverrideId: "l3", createdAt: "", updatedAt: "" };
+    const student = { id: "s1", batchId: "b1", mssv: "101", name: "SV A", className: "", courseCode: "", courseName: "", groupCodeFromSource: "N01", advisorNameFromSource: "", sourceWorkbookId: "wb1", sourceRowNumber: 1, errors: [], warnings: [], createdAt: "", updatedAt: "" } as any;
+    const group = { id: "g1", batchId: "b1", groupCode: "T.Tung_T.Thanh_40_N01", defaultAdvisorId: "l1", graderId: null, sourceWorkbookId: "wb1", createdAt: "", updatedAt: "" };
+    const workbooks = [
+      {
+        id: "wb1",
+        batchId: "b1",
+        fileName: "wb1.xlsx",
+        importedAt: "",
+        groupPrefix: "T.Tung_T.Thanh_40",
+        metaLecturerNames: ["Huỳnh Thanh Tùng", "Trần Văn Thanh"],
+      } as any,
+    ];
+
+    expect(getStudentAdvisorDisplayName(member, student, group, lecturers, workbooks)).toBe("Nguyễn Văn Nam");
   });
 });

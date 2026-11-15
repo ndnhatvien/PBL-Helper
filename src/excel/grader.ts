@@ -7,9 +7,10 @@ import type {
   Lecturer,
   PblGroup,
   Score,
+  SourceWorkbook,
   Student,
 } from "../types";
-import { getEffectiveAdvisorId } from "../domain/advisor";
+import { getStudentAdvisorDisplayName } from "../domain/advisor";
 import { parseScoreValue } from "../utils/score";
 import { cellText, isBlankRow, normalizeText } from "../utils/text";
 
@@ -21,7 +22,7 @@ export interface GraderExportFile {
   studentCount: number;
 }
 
-interface GraderExportInput {
+export interface GraderExportInput {
   batch: ExamBatch;
   students: Student[];
   groups: PblGroup[];
@@ -29,6 +30,7 @@ interface GraderExportInput {
   lecturers: Lecturer[];
   scores: Score[];
   graders: Lecturer[];
+  sourceWorkbooks?: SourceWorkbook[];
 }
 
 const HEADERS = [
@@ -39,8 +41,7 @@ const HEADERS = [
   "Lớp",
   "Mã học phần",
   "Tên học phần",
-  "GVHD mặc định",
-  "GVHD hiệu lực",
+  "Giảng viên hướng dẫn",
   "Điểm",
   "Ghi chú chấm",
 ];
@@ -49,9 +50,6 @@ export function buildGraderWorkbook(
   input: GraderExportInput,
   grader: Lecturer,
 ): { workbook: XLSX.WorkBook; groupCount: number; studentCount: number } {
-  const lecturerName = new Map(
-    input.lecturers.map((lecturer) => [lecturer.id, lecturer.displayName]),
-  );
   const scoreByStudent = new Map(
     input.scores.map((score) => [score.studentId, score]),
   );
@@ -91,9 +89,12 @@ export function buildGraderWorkbook(
       .sort((a, b) => a.student.mssv.localeCompare(b.student.mssv, "vi"));
 
     for (const { member, student } of groupMembers) {
-      const advisorId = getEffectiveAdvisorId(
-        member.advisorOverrideId,
-        group.defaultAdvisorId,
+      const advisorDisplay = getStudentAdvisorDisplayName(
+        member,
+        student,
+        group,
+        input.lecturers,
+        input.sourceWorkbooks,
       );
       const score = scoreByStudent.get(student.id);
       rows.push([
@@ -104,10 +105,7 @@ export function buildGraderWorkbook(
         student.className,
         student.courseCode,
         student.courseName,
-        group.defaultAdvisorId
-          ? lecturerName.get(group.defaultAdvisorId) ?? "—"
-          : "—",
-        advisorId ? lecturerName.get(advisorId) ?? "—" : "—",
+        advisorDisplay,
         score ? score.value : "",
         "",
       ]);
@@ -118,14 +116,13 @@ export function buildGraderWorkbook(
   const sheet = XLSX.utils.aoa_to_sheet(rows);
   sheet["!cols"] = [
     { wch: 38, hidden: true },
-    { wch: 12 },
+    { wch: 14 },
     { wch: 14 },
     { wch: 26 },
     { wch: 12 },
     { wch: 18 },
     { wch: 32 },
-    { wch: 22 },
-    { wch: 22 },
+    { wch: 28 },
     { wch: 10 },
     { wch: 30 },
   ];
@@ -133,7 +130,7 @@ export function buildGraderWorkbook(
   const headerExcelRow = headerRowIdx >= 0 ? headerRowIdx + 1 : 10;
   const dataStartExcelRow = headerExcelRow + 1;
   sheet["!autofilter"] = {
-    ref: `A${headerExcelRow}:K${Math.max(rows.length, headerExcelRow)}`,
+    ref: `A${headerExcelRow}:J${Math.max(rows.length, headerExcelRow)}`,
   };
   sheet["!freeze"] = `A${dataStartExcelRow}`;
 

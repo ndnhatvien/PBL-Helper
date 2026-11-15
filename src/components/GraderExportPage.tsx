@@ -70,6 +70,7 @@ export function GraderExportPage({
       lecturers: context.lecturers,
       scores: context.scores,
       graders: targets,
+      sourceWorkbooks: context.sourceWorkbooks,
     });
     setLastExport(files);
     files.forEach((file, index) => {
