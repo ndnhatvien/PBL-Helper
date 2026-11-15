@@ -2,6 +2,9 @@ node_modules
 dist
 .superpowers
 *.local
+.env
+.env.local
+.env.*.local
 .vercel
 bun.lock
 
