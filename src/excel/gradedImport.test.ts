@@ -58,7 +58,10 @@ describe("xuất phiếu chấm", () => {
 
     const workbook = readWorkbook(file.buffer);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    expect((sheet["!cols"] as Array<{ hidden?: boolean }>)[0]?.hidden).toBe(true);
+    const cols = sheet["!cols"] as Array<{ hidden?: boolean }>;
+    expect(cols[0]?.hidden).toBe(true); // Cột A: studentKey
+    expect(cols[6]?.hidden).toBe(true); // Cột G: Tên học phần
+    expect(cols[7]?.hidden).toBe(true); // Cột H: Giảng viên hướng dẫn
 
     const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1 });
     const roomRow = matrix.find((row) => row[0] === "Phòng");

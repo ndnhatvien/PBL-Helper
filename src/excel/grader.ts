@@ -68,7 +68,7 @@ export function buildGraderWorkbook(
     ["Thang điểm", `${input.batch.scoreConfig.min}–${input.batch.scoreConfig.max}, tối đa ${input.batch.scoreConfig.decimals} chữ số thập phân`],
     [
       "Hướng dẫn",
-      "Chỉ nhập điểm vào cột Điểm. Không sửa, ẩn hoặc xóa cột studentKey và các dòng mã phía trên. Lưu file .xlsx và gửi lại cho điều phối viên.",
+      "Chỉ nhập điểm vào cột Điểm (cột I). Cột G (Tên HP) và H (GVHD) được ẩn để thuận tiện nhập điểm (Unhide nếu cần xem). Không sửa hoặc xóa cột studentKey (cột A ẩn) và các dòng mã phía trên. Lưu file .xlsx và gửi lại cho điều phối viên.",
     ],
     [],
     HEADERS,
@@ -121,8 +121,8 @@ export function buildGraderWorkbook(
     { wch: 26 },
     { wch: 12 },
     { wch: 18 },
-    { wch: 32 },
-    { wch: 28 },
+    { wch: 32, hidden: true },
+    { wch: 28, hidden: true },
     { wch: 10 },
     { wch: 30 },
   ];
