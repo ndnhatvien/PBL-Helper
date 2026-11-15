@@ -833,17 +833,18 @@ export function autoCreateGroupsFromSource(
 
   for (const s of studentsWithGroup) {
     const rawCode = s.groupCodeFromSource.trim();
-    const compoundKey = `${s.sourceWorkbookId}::${rawCode.toLowerCase()}`;
+    const normCode = normalizeRawGroupCode(rawCode);
+    const compoundKey = `${s.sourceWorkbookId}::${normCode.toLowerCase()}`;
     const existing = grouped.get(compoundKey);
     if (existing) {
       existing.students.push(s);
     } else {
       const wb = workbookMap.get(s.sourceWorkbookId);
-      const finalGroupCode = formatCompoundGroupCode(wb, rawCode);
+      const finalGroupCode = formatCompoundGroupCode(wb, normCode);
 
       grouped.set(compoundKey, {
         sourceWorkbookId: s.sourceWorkbookId,
-        rawCode,
+        rawCode: normCode,
         finalGroupCode,
         students: [s],
       });

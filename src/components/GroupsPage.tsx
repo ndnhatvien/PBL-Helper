@@ -1420,6 +1420,7 @@ function GroupCard({
     : "";
 
   const formattedTitle =
+    isBarred ||
     view.group.groupCode.toLowerCase().includes("nhóm") ||
     view.group.groupCode.includes("-") ||
     view.group.groupCode.includes("_")

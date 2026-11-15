@@ -198,13 +198,15 @@ describe("phân công giảng viên chấm", () => {
     expect(Math.max(...sGroupCounts) - Math.min(...sGroupCounts)).toBeLessThanOrEqual(3);
   });
 
-  it("bỏ qua các nhóm cấm thi (xxx, XXX, _xxx) và không phân công chấm thi", () => {
+  it("bỏ qua các nhóm cấm thi (xxx, XXX, _xxx, X##, _X##) và không phân công chấm thi", () => {
     const mixedGroups: AssignmentGroupInput[] = [
       { id: "g1", groupCode: "T.Nam_41_N01", studentCount: 3, excludedLecturerIds: ["L1"] },
       { id: "g2", groupCode: "T.Nam_41_N02", studentCount: 3, excludedLecturerIds: ["L1"] },
-      { id: "g3", groupCode: "T.Nam_41_XXX", studentCount: 1, excludedLecturerIds: ["L1"] }, // Cấm thi
-      { id: "g4", groupCode: "xxx", studentCount: 2, excludedLecturerIds: ["L2"] }, // Cấm thi
-      { id: "g5", groupCode: "T.Tung_40_N01", studentCount: 3, excludedLecturerIds: ["L2"] },
+      { id: "g3", groupCode: "T.Nam_41_XXX", studentCount: 1, excludedLecturerIds: ["L1"] }, // Cấm thi dạng XXX
+      { id: "g4", groupCode: "xxx", studentCount: 2, excludedLecturerIds: ["L2"] }, // Cấm thi dạng xxx
+      { id: "g5", groupCode: "T.Nam_41_X01", studentCount: 1, excludedLecturerIds: ["L1"] }, // Cấm thi dạng X01
+      { id: "g6", groupCode: "X02", studentCount: 1, excludedLecturerIds: ["L2"] }, // Cấm thi dạng X02
+      { id: "g7", groupCode: "T.Tung_40_N01", studentCount: 3, excludedLecturerIds: ["L2"] },
     ];
     const lecturers = ["L1", "L2", "L3"];
 
@@ -213,15 +215,19 @@ describe("phân công giảng viên chấm", () => {
     // Các nhóm cấm thi không được phân cho bất kỳ GV nào
     expect(result.assignments["g3"]).toBeUndefined();
     expect(result.assignments["g4"]).toBeUndefined();
+    expect(result.assignments["g5"]).toBeUndefined();
+    expect(result.assignments["g6"]).toBeUndefined();
 
     // Các nhóm cấm thi cũng không bị coi là lỗi chưa phân công
     expect(result.unassignedGroupIds).not.toContain("g3");
     expect(result.unassignedGroupIds).not.toContain("g4");
+    expect(result.unassignedGroupIds).not.toContain("g5");
+    expect(result.unassignedGroupIds).not.toContain("g6");
 
     // Chỉ có 3 nhóm hợp lệ được phân công
     expect(result.assignments["g1"]).toBeDefined();
     expect(result.assignments["g2"]).toBeDefined();
-    expect(result.assignments["g5"]).toBeDefined();
+    expect(result.assignments["g7"]).toBeDefined();
     expect(Object.keys(result.assignments)).toHaveLength(3);
   });
 });

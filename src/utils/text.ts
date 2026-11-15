@@ -99,12 +99,20 @@ export function generateScorecardPrefix(
 
 /**
  * Chuẩn hóa mã nhóm con trong bảng điểm (VD: "1" -> "N01", "01" -> "N01", "15" -> "N15", "Nhóm 1" -> "N01")
+ * Hỗ trợ các mã cấm thi:
+ * - "xxx", "XXX" -> "XXX"
+ * - "X01", "X1", "x02", "Nhóm X01" -> "X01", "X02"...
  */
 export function normalizeRawGroupCode(rawCode: string): string {
   const clean = rawCode.trim();
   if (!clean) return "";
-  if (clean.toLowerCase() === "xxx") {
+  if (/^x{3,}$/i.test(clean)) {
     return "XXX";
+  }
+  const xMatch = clean.match(/^(?:nhóm\s+|nhom\s+)?x[-_]?\s*0*(\d+)$/i);
+  if (xMatch) {
+    const num = parseInt(xMatch[1], 10);
+    return `X${num < 10 ? "0" + num : num}`;
   }
   if (/^\d+$/.test(clean)) {
     const num = parseInt(clean, 10);
@@ -119,19 +127,16 @@ export function normalizeRawGroupCode(rawCode: string): string {
 }
 
 /**
- * Kiểm tra mã nhóm có phải ký hiệu cấm thi (xxx) không.
+ * Kiểm tra mã nhóm có phải ký hiệu cấm thi (xxx hoặc X## với ## là số thứ tự) không.
  * Các nhóm cấm thi sẽ không được phân công chấm thi.
- * Ví dụ: "xxx", "XXX", "T.Nam_41_XXX", "Nhóm xxx", "41_xxx" -> true
+ * Ví dụ:
+ * - Dạng xxx: "xxx", "XXX", "T.Nam_41_XXX", "Nhóm xxx", "41_xxx" -> true
+ * - Dạng X##: "X01", "X1", "x02", "T.Nam_41_X01", "Nhóm X01", "41_X02" -> true
  */
 export function isBarredGroupCode(code?: string | null): boolean {
   if (!code) return false;
-  const clean = code.trim().toLowerCase();
-  return (
-    clean === "xxx" ||
-    clean.endsWith("_xxx") ||
-    clean.endsWith("-xxx") ||
-    /(?:^|[_-\s])xxx(?:[_-\s]|$)/i.test(clean)
-  );
+  const clean = code.trim();
+  return /(?:^|[_-\s])(?:nhóm\s+|nhom\s+)?(?:x{3,}|x[-_]?\s*\d+)(?:[_-\s]|$)/i.test(clean);
 }
 
 /**
